@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Pomodoro</title>
+<meta name="theme-color" content="#14110f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pomodoro">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<style>
+  :root {
+    --bg: #14110f;
+    --card: #1e1a17;
+    --text: #f4ede6;
+    --muted: #9a8f86;
+    --focus: #ff6b4a;
+    --short: #4ecb9a;
+    --long: #6ea8ff;
+    --accent: var(--focus);
+    --track: #2b2622;
+  }
+  body[data-mode="short"] { --accent: var(--short); }
+  body[data-mode="long"]  { --accent: var(--long); }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: env(safe-area-inset-top) 20px calc(env(safe-area-inset-bottom) + 16px);
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: background .4s;
+  }
+  header {
+    width: 100%; max-width: 420px;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 0 6px;
+  }
+  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .2px; }
+  .icon-btn {
+    background: var(--card); color: var(--text); border: 0;
+    width: 40px; height: 40px; border-radius: 50%;
+    font-size: 18px; cursor: pointer;
+  }
+  .tabs {
+    width: 100%; max-width: 420px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    background: var(--card); padding: 5px; border-radius: 14px; margin-top: 10px;
+  }
+  .tab {
+    border: 0; background: transparent; color: var(--muted);
+    padding: 10px 0; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .tab.active { background: var(--accent); color: #14110f; }
+
+  main {
+    flex: 1; width: 100%; max-width: 420px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 28px;
+  }
+  .ring-wrap { position: relative; width: min(78vw, 320px); aspect-ratio: 1; }
+  svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .track { fill: none; stroke: var(--track); stroke-width: 10; }
+  .progress {
+    fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round;
+    transition: stroke-dashoffset .3s linear, stroke .4s;
+  }
+  .time {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  #clock { font-size: clamp(54px, 18vw, 76px); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+  #label { color: var(--muted); font-size: 15px; margin-top: 4px; }
+
+  .controls { display: flex; align-items: center; gap: 22px; }
+  .btn-main {
+    background: var(--accent); color: #14110f; border: 0;
+    min-width: 150px; height: 64px; border-radius: 32px;
+    font-size: 19px; font-weight: 700; cursor: pointer;
+    transition: transform .1s;
+  }
+  .btn-main:active { transform: scale(.96); }
+  .btn-side {
+    background: var(--card); color: var(--text); border: 0;
+    width: 52px; height: 52px; border-radius: 50%; font-size: 20px; cursor: pointer;
+  }
+  .dots { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--track); }
+  .dot.done { background: var(--focus); }
+
+  /* settings sheet */
+  .sheet-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: none; align-items: flex-end; justify-content: center; z-index: 10;
+  }
+  .sheet-bg.open { display: flex; }
+  .sheet {
+    background: var(--card); width: 100%; max-width: 480px;
+    border-radius: 22px 22px 0 0; padding: 22px 22px calc(env(safe-area-inset-bottom) + 22px);
+  }
+  .sheet h2 { margin: 0 0 14px; font-size: 18px; }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid var(--track); }
+  .row:first-of-type { border-top: 0; }
+  .row input[type=number] {
+    width: 70px; background: var(--bg); color: var(--text); border: 1px solid var(--track);
+    border-radius: 10px; padding: 8px; font-size: 16px; text-align: center;
+  }
+  .row input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--focus); }
+  .done-btn {
+    margin-top: 14px; width: 100%; height: 48px; border: 0; border-radius: 14px;
+    background: var(--focus); color: #14110f; font-weight: 700; font-size: 16px; cursor: pointer;
+  }
+</style>
+</head>
+<body data-mode="focus">
+
+<header>
+  <h1>🍅 Pomodoro</h1>
+  <button class="icon-btn" id="openSettings" aria-label="Settings">⚙︎</button>
+</header>
+
+<div class="tabs" id="tabs">
+  <button class="tab active" data-mode="focus">Focus</button>
+  <button class="tab" data-mode="short">Short break</button>
+  <button class="tab" data-mode="long">Long break</button>
+</div>
+
+<main>
+  <div class="ring-wrap">
+    <svg viewBox="0 0 120 120">
+      <circle class="track" cx="60" cy="60" r="54"/>
+      <circle class="progress" id="progress" cx="60" cy="60" r="54"/>
+    </svg>
+    <div class="time">
+      <div id="clock">25:00</div>
+      <div id="label">Time to focus</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn-side" id="reset" aria-label="Reset">↺</button>
+    <button class="btn-main" id="toggle">Start</button>
+    <button class="btn-side" id="skip" aria-label="Skip">⏭</button>
+  </div>
+
+  <div class="dots" id="dots"></div>
+</main>
+
+<div class="sheet-bg" id="sheetBg">
+  <div class="sheet">
+    <h2>Settings</h2>
+    <div class="row"><span>Focus (min)</span><input type="number" id="s-focus" min="1" max="180"></div>
+    <div class="row"><span>Short break (min)</span><input type="number" id="s-short" min="1" max="60"></div>
+    <div class="row"><span>Long break (min)</span><input type="number" id="s-long" min="1" max="90"></div>
+    <div class="row"><span>Focus rounds before long break</span><input type="number" id="s-rounds" min="2" max="10"></div>
+    <div class="row"><span>Auto-start next session</span><input type="checkbox" id="s-auto"></div>
+    <div class="row"><span>Sound &amp; vibration</span><input type="checkbox" id="s-sound"></div>
+    <button class="done-btn" id="closeSettings">Done</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const LS = 'pomodoro.v1';
+  const defaults = { focus: 25, short: 5, long: 15, rounds: 4, auto: false, sound: true };
+  const labels = { focus: 'Time to focus', short: 'Take a short break', long: 'Take a long break' };
+  const C = 2 * Math.PI * 54;
+
+  let st = Object.assign({
+    settings: { ...defaults },
+    mode: 'focus',
+    completed: 0,          // focus sessions finished in the current cycle
+    running: false,
+    endAt: 0,              // ms timestamp when running
+    remaining: defaults.focus * 60 * 1000  // ms when paused
+  }, JSON.parse(localStorage.getItem(LS) || '{}'));
+  st.settings = Object.assign({}, defaults, st.settings);
+
+  const save = () => localStorage.setItem(LS, JSON.stringify(st));
+  const durMs = mode => st.settings[mode] * 60 * 1000;
+  const left = () => st.running ? Math.max(0, st.endAt - Date.now()) : st.remaining;
+
+  const progress = $('progress');
+  progress.style.strokeDasharray = C;
+
+  function fmt(ms) {
+    const s = Math.ceil(ms / 1000);
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function render() {
+    const ms = left();
+    $('clock').textContent = fmt(ms);
+    $('label').textContent = labels[st.mode];
+    $('toggle').textContent = st.running ? 'Pause' : (ms < durMs(st.mode) ? 'Resume' : 'Start');
+    document.body.dataset.mode = st.mode;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode === st.mode));
+    progress.style.strokeDashoffset = C * (1 - ms / durMs(st.mode));
+    document.title = st.running ? `${fmt(ms)} · Pomodoro` : 'Pomodoro';
+
+    const dots = $('dots');
+    dots.innerHTML = '';
+    for (let i = 0; i < st.settings.rounds; i++) {
+      const d = document.createElement('span');
+      d.className = 'dot' + (i < st.completed ? ' done' : '');
+      dots.appendChild(d);
+    }
+  }
+
+  // ----- sound / vibration / notification
+  let audioCtx;
+  function beep() {
+    if (!st.settings.sound) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      [0, .25, .5].forEach(t => {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+        const n = audioCtx.currentTime + t;
+        g.gain.setValueAtTime(.0001, n);
+        g.gain.exponentialRampToValueAtTime(.4, n + .02);
+        g.gain.exponentialRampToValueAtTime(.0001, n + .2);
+        o.start(n); o.stop(n + .22);
+      });
+    } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  }
+
+  // ----- wake lock keeps the screen on while the timer runs
+  let wake;
+  async function lockScreen() {
+    try { if ('wakeLock' in navigator && st.running) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  function unlockScreen() { try { wake && wake.release(); } catch (e) {} wake = null; }
+
+  // ----- core
+  function setMode(mode, autostart) {
+    st.mode = mode;
+    st.running = false;
+    st.remaining = durMs(mode);
+    unlockScreen();
+    if (autostart) start();
+    save(); render();
+  }
+
+  function start() {
+    st.running = true;
+    st.endAt = Date.now() + st.remaining;
+    // unlock audio on a user gesture
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch (e) {}
+    lockScreen(); save(); render();
+  }
+  function pause() {
+    st.remaining = left();
+    st.running = false;
+    unlockScreen(); save(); render();
+  }
+
+  function finish() {
+    beep();
+    if (st.mode === 'focus') {
+      st.completed++;
+      if (st.completed >= st.settings.rounds) { st.completed = 0; setMode('long', st.settings.auto); return; }
+      setMode('short', st.settings.auto);
+    } else {
+      setMode('focus', st.settings.auto);
+    }
+  }
+
+  function tick() {
+    if (st.running && left() <= 0) finish(); else render();
+  }
+
+  $('toggle').onclick = () => st.running ? pause() : start();
+  $('reset').onclick = () => { st.running = false; st.remaining = durMs(st.mode); unlockScreen(); save(); render(); };
+  $('skip').onclick = () => {
+    if (st.mode === 'focus') {
+      st.completed++;
+      if (st.completed >= st.settings.rounds) { st.completed = 0; return setMode('long'); }
+      return setMode('short');
+    }
+    setMode('focus');
+  };
+  $('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) setMode(b.dataset.mode); };
+
+  // ----- settings
+  const fields = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds' };
+  $('openSettings').onclick = () => {
+    for (const k in fields) $(fields[k]).value = st.settings[k];
+    $('s-auto').checked = st.settings.auto;
+    $('s-sound').checked = st.settings.sound;
+    $('sheetBg').classList.add('open');
+  };
+  function closeSettings() {
+    for (const k in fields) {
+      const v = parseInt($(fields[k]).value, 10);
+      if (v > 0) st.settings[k] = v;
+    }
+    st.settings.auto = $('s-auto').checked;
+    st.settings.sound = $('s-sound').checked;
+    if (!st.running) st.remaining = durMs(st.mode);
+    if (st.completed >= st.settings.rounds) st.completed = 0;
+    $('sheetBg').classList.remove('open');
+    save(); render();
+  }
+  $('closeSettings').onclick = closeSettings;
+  $('sheetBg').onclick = e => { if (e.target === $('sheetBg')) closeSettings(); };
+
+  // coming back from background: re-sync and re-acquire wake lock
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { tick(); lockScreen(); }
+  });
+
+  setInterval(tick, 250);
+  render();
+  if (st.running) lockScreen();
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+})();
+</script>
+</body>
+</html>
