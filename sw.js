@@ -1,4 +1,6 @@
-const CACHE = 'pomodoro-v1';
+// Bump VERSION on each release (also change APP_VERSION in index.html).
+const VERSION = '2.0.0';
+const CACHE = 'solo-leveling-' + VERSION;
 const ASSETS = [
   './',
   'index.html',
@@ -9,7 +11,9 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+  );
   self.skipWaiting();
 });
 
@@ -21,14 +25,24 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Cache-first, falling back to network; works offline after first load.
+// Network-first (always revalidated) so updates arrive automatically;
+// falls back to the cache when offline or the network is slow.
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+  const req = e.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+
+  const network = fetch(req, { cache: 'no-cache' }).then(res => {
+    if (res && res.ok) {
       const copy = res.clone();
-      caches.open(CACHE).then(c => c.put(e.request, copy));
-      return res;
-    }).catch(() => caches.match('index.html')))
+      caches.open(CACHE).then(c => c.put(req, copy));
+    }
+    return res;
+  });
+  const timeout = new Promise((_, rej) => setTimeout(rej, 4000));
+
+  e.respondWith(
+    Promise.race([network, timeout]).catch(() =>
+      caches.match(req, { ignoreSearch: true }).then(hit => hit || caches.match('index.html'))
+    )
   );
 });

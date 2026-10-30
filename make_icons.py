@@ -1,27 +1,53 @@
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 import os
 
 os.makedirs("icons", exist_ok=True)
+S = 1024
 
-def draw(size):
-    S = size * 4  # supersample for smooth edges
-    img = Image.new("RGB", (S, S), "#14110f")
-    d = ImageDraw.Draw(img)
-    cx = cy = S // 2
-    # tomato body
-    r = int(S * 0.30)
-    d.ellipse((cx - r, cy - r + S * 0.04, cx + r, cy + r + S * 0.04), fill="#ff6b4a")
-    # highlight
-    hr = int(S * 0.07)
-    d.ellipse((cx - r * 0.55, cy - r * 0.45, cx - r * 0.55 + hr * 2, cy - r * 0.45 + hr * 1.2), fill="#ff9a80")
-    # leaves
-    leaf = "#4ecb9a"
-    top = cy - r + S * 0.04
-    d.polygon([(cx, top + S * 0.02), (cx - S * 0.13, top - S * 0.04), (cx - S * 0.05, top + S * 0.05)], fill=leaf)
-    d.polygon([(cx, top + S * 0.02), (cx + S * 0.13, top - S * 0.04), (cx + S * 0.05, top + S * 0.05)], fill=leaf)
-    d.rectangle((cx - S * 0.012, top - S * 0.09, cx + S * 0.012, top + S * 0.02), fill=leaf)
-    return img.resize((size, size), Image.LANCZOS)
 
+def gradient(size, top, bottom):
+    img = Image.new("RGB", (size, size))
+    px = img.load()
+    for y in range(size):
+        t = y / (size - 1)
+        c = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+        for x in range(size):
+            px[x, y] = c
+    return img
+
+
+def master():
+    bg = Image.new("RGB", (S, S), (6, 7, 12))
+    # soft violet/blue glow behind the mark
+    glow = Image.new("RGB", (S, S), (0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse((172, 232, 852, 912), fill=(70, 90, 255))
+    glow = glow.filter(ImageFilter.GaussianBlur(150))
+    bg = Image.blend(bg, Image.composite(glow, bg, glow.convert("L")), 0.55)
+
+    # two rising chevrons = "level up"
+    def chevrons(width):
+        m = Image.new("L", (S, S), 0)
+        d = ImageDraw.Draw(m)
+        for dy, alpha in ((0, 255), (190, 130)):
+            pts = [(318, 470 + dy), (512, 290 + dy), (706, 470 + dy)]
+            d.line(pts, fill=alpha, width=width, joint="curve")
+            for p in (pts[0], pts[2]):
+                r = width // 2
+                d.ellipse((p[0] - r, p[1] - r, p[0] + r, p[1] + r), fill=alpha)
+        return m
+
+    mark = chevrons(78)
+    halo = mark.filter(ImageFilter.GaussianBlur(34))
+    halo_col = Image.new("RGB", (S, S), (80, 150, 255))
+    bg = Image.composite(halo_col, bg, halo.point(lambda v: int(v * 0.9)))
+
+    fill = gradient(S, (120, 225, 255), (120, 110, 255))
+    bg = Image.composite(fill, bg, mark)
+    return bg
+
+
+m = master()
 for name, size in [("icon-192.png", 192), ("icon-512.png", 512), ("apple-touch-icon.png", 180)]:
-    draw(size).save(os.path.join("icons", name))
+    m.resize((size, size), Image.LANCZOS).save(os.path.join("icons", name))
 print("ok")
