@@ -2,8 +2,10 @@ import { levelOf, levelInfo, rankOf, stats, dkey, agoKey, xpFor } from './rpg.js
 import { createStore, parseBackup } from './store.js';
 import * as TM from './timer.js';
 import { createAudio } from './audio.js';
+import { createWolf, wolfSVG } from './wolf.js';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '4.0.0';
+const APP_NAME = 'Zyntry';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -65,7 +67,7 @@ const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 /* ---------- theme ---------- */
 function applyTheme() {
   const s = settings(), b = document.body;
-  b.dataset.accent = s.accent; b.dataset.black = s.black ? '1' : '0'; b.dataset.calm = s.calm ? '1' : '0';
+  b.dataset.accent = s.accent; b.dataset.black = s.black ? '1' : '0'; b.dataset.calm = s.calm ? '1' : '0'; b.dataset.wolf = s.wolf ? '1' : '0';
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = s.black ? '#000000' : '#06070c';
 }
 
@@ -84,7 +86,7 @@ progress.style.strokeDasharray = C;
 let lastClock = '';
 function renderClock() {
   const ms = TM.remaining(timer, Date.now()), txt = fmtClock(ms);
-  if (txt !== lastClock) { lastClock = txt; $('clock').textContent = txt; document.title = timer.running ? txt + ' · Solo Leveling' : 'Solo Leveling'; }
+  if (txt !== lastClock) { lastClock = txt; $('clock').textContent = txt; document.title = timer.running ? txt + ' · ' + APP_NAME : APP_NAME; }
   const frac = Math.min(1, Math.max(0, ms / timer.total));
   progress.style.strokeDashoffset = C * (1 - frac);
   const th = frac * 2 * Math.PI;
@@ -102,10 +104,39 @@ function renderTimer() {
   for (let i = 0; i < settings().rounds; i++) { const d = document.createElement('span'); d.className = 'dot' + (i < timer.completed ? ' done' : ''); dots.appendChild(d); }
   $('taskName').textContent = (timer.task && store.taskTitle(timer.task)) || 'None';
   const li = levelInfo(store.totalXp());
+  const tier = { E: 0, D: 1, C: 1, B: 2, A: 2, S: 3 }[li.rank];
+  wolf.tier(tier); $('lvlWolf').dataset.tier = String(tier);
+  wolf.set(timer.running ? (timer.mode === 'focus' ? 'focus' : 'rest') : TM.inProgress(timer) ? 'paused' : 'idle', { talk: booted });
+  const td = todayInfo();
+  $('goalTxt').innerHTML = `<b>${td.n}</b> / ${settings().goal} today`; $('goalTxt').classList.toggle('met', td.n >= settings().goal);
+  $('streakN').textContent = td.streak; $('streakChip').classList.toggle('hot', td.streak > 0);
+  syncAmbient();
   $('lvNum').textContent = li.level; $('rankLetter').textContent = li.rank; $('rankName').textContent = 'Rank ' + li.rank;
   $('xpNum').textContent = li.into + ' / ' + li.need + ' XP'; $('xpBar').style.width = (li.into / li.need * 100) + '%';
   lastClock = ''; renderClock();
 }
+
+/* ---------- wolf, goal, focus sounds ---------- */
+const wolf = createWolf($('wolf'), $('bubble'));
+$('lvlWolf').innerHTML = wolfSVG();
+let booted = false;
+function todayInfo() {
+  const s = stats(store.history, store.tasks, Date.now());
+  return { n: s.todayN, streak: s.streak };
+}
+$('wolf').onclick = () => { audio.unlock(); audio.play('tap'); buzz(15); wolf.react('happy', 1800, wolf.line('tap')); };
+const AMB_NAMES = { off: 'Off', rain: 'Rain', brown: 'Brown noise', waves: 'Waves', white: 'White noise' };
+const AMB_ORDER = ['off', 'rain', 'brown', 'waves', 'white'];
+function syncAmbient() {
+  const k = settings().ambient;
+  $('soundName').textContent = AMB_NAMES[k]; $('soundChip').classList.toggle('on', k !== 'off');
+  audio.ambient(timer.running && timer.mode === 'focus' ? k : 'off');
+}
+$('soundChip').onclick = () => {
+  const k = AMB_ORDER[(AMB_ORDER.indexOf(settings().ambient) + 1) % AMB_ORDER.length];
+  store.setSettings({ ambient: k }); syncAmbient(); audio.unlock(); audio.play('tap');
+  toast(k === 'off' ? 'Focus sound off' : `Focus sound: ${AMB_NAMES[k]}` + (timer.running && timer.mode === 'focus' ? '' : ' · plays while you focus'));
+};
 
 /* ---------- wake lock ---------- */
 let wake;
@@ -167,6 +198,7 @@ function finish(n) {
   const t = timer, over = n - t.endAt, fresh = over < 5000;
   const entry = TM.completedEntry(t);
   let added = false, leveled = null;
+  const goalBefore = todayInfo().n;
   if (entry) {
     const before = levelOf(store.totalXp());
     added = store.addSession(entry);                     // history is written BEFORE the timer state, and ids are unique:
@@ -185,11 +217,14 @@ function finish(n) {
 
   if (t.mode === 'focus') {
     if (fresh) { audio.play('focusDone'); buzz([200, 100, 200, 100, 300]); }
+    const g = settings().goal, goalNow = todayInfo().n;
+    if (added && goalBefore < g && goalNow >= g) { wolf.react('howl', 3600, wolf.line('goal')); setTimeout(() => toast(`Daily goal reached · ${goalNow}/${g} 🎯`, 3600), 3700); }
+    else if (added) wolf.react('happy', 3200, wolf.line('done') + (entry.x ? ` +${entry.x} XP` : ''));
     if (added) toast(entry.x ? `Session complete · +${entry.x} XP` : 'Session complete · no XP (under 10 min)', 3600);
     notify('Focus session complete', entry && entry.x ? `+${entry.x} XP. Time for a break.` : 'Time for a break.');
   } else {
     if (fresh) { audio.play('breakDone'); buzz([200, 100, 200]); }
-    toast('Break over — ready to focus', 3000);
+    toast('Break over — ready to focus', 3000); wolf.react('happy', 2200, 'Break’s over. Back on the hunt?');
     notify('Break is over', 'Ready for the next focus session?');
   }
   if (!fresh) toast('Your session finished while you were away', 4000);
@@ -200,7 +235,7 @@ function finish(n) {
 function levelUp(a, b) {
   $('lvlN').textContent = b;
   $('lvlS').textContent = rankOf(b) !== rankOf(a) ? 'Rank up · ' + rankOf(a) + ' → ' + rankOf(b) : 'Rank ' + rankOf(b);
-  $('lvl').classList.add('show'); audio.play('levelUp'); buzz([60, 40, 60, 40, 200]);
+  $('lvl').classList.add('show'); wolf.react('howl', 3200); audio.play('levelUp'); buzz([60, 40, 60, 40, 200]);
   clearTimeout(levelUp.t); levelUp.t = setTimeout(() => $('lvl').classList.remove('show'), 3200);
 }
 $('lvl').onclick = () => $('lvl').classList.remove('show');
@@ -295,14 +330,26 @@ $('taskChip').onclick = async () => {
   const open = store.tasks.filter(t => !t.done).sort((a, b) => a.pri - b.pri || a.created - b.created);
   const body = `<button class="opt ${!timer.task ? 'on' : ''}" data-resolve="">No task</button>` +
     open.map(t => `<button class="opt ${timer.task === t.id ? 'on' : ''}" data-resolve="${esc(t.id)}"><span class="pri p${t.pri}"></span>${esc(t.title)}</button>`).join('');
-  const v = await dialog({ title: 'Focus on…', text: open.length ? '' : 'You have no open tasks. Add one in the Tasks tab.', body, buttons: [{ label: 'Close', value: null, cls: 'ghost' }] });
+  const add = `<input type="text" id="quickTask" maxlength="120" placeholder="New task — type and press Add" aria-label="New task">`;
+  const v = await dialog({ title: 'Focus on…', body: add + body, buttons: [{ label: 'Close', value: null, cls: 'ghost' }, { label: 'Add & focus', value: '__new', primary: true }] });
   if (v === null) return;
+  if (v === '__new') {
+    const title = ($('quickTask').value || '').trim(); if (!title) return;
+    const t = store.addTask(title, 2); if (!t) return;
+    setTimer({ ...timer, task: t.id }); toast('Focusing on: ' + t.title); renderTimer(); return;
+  }
   setTimer({ ...timer, task: v || null }); renderTimer();
 };
 
 /* ---------- statistics + history ---------- */
 let lastStats = '', histShown = 20, sortedRev = -1, sortedHist = [];
 function liveSec() { return timer.mode === 'focus' && TM.inProgress(timer) ? TM.elapsed(timer, Date.now()) / 1000 : 0; }
+function goalDays() {
+  const g = settings().goal, per = new Map();
+  for (const h of store.history) if (h.m === 'focus' && h.c) { const k = dkey(h.t); per.set(k, (per.get(k) || 0) + 1); }
+  let n = 0; for (let i = 0; i < 7; i++) if ((per.get(agoKey(i)) || 0) >= g) n++;
+  return n;
+}
 function renderStats() {
   const live = liveSec(), s = stats(store.history, store.tasks, Date.now(), live), li = levelInfo(store.totalXp());
   const max = Math.max(1, ...s.week.map(d => d.sec));
@@ -330,6 +377,7 @@ function renderStats() {
       ${card('Day streak', s.streak, s.streak === 1 ? 'day' : 'days')}${card('Best streak', s.best, s.best === 1 ? 'day' : 'days')}
       ${card('Sessions done', s.done)}${card('Completion', s.rate == null ? '–' : s.rate, s.rate == null ? '' : '%')}
       ${card('Total focus', fmtMin(s.totalSec))}${card('Total XP', s.totalXp.toLocaleString())}
+      ${card('Daily goal', s.todayN + ' / ' + settings().goal, 'sessions')}${card('Goal days', goalDays(s), 'last 7')}
       ${card('Level', li.level, 'Rank ' + li.rank)}${card('Tasks done', s.tasksDoneToday, 'today · ' + s.tasksDoneTotal + ' total')}
     </div>
     <div class="glass chart"><div class="k">Last 7 days</div>
@@ -349,7 +397,7 @@ function renderStats() {
 $('statsView').onclick = e => { if (e.target.id === 'moreHist') { histShown += 30; lastStats = ''; renderStats(); } };
 
 /* ---------- settings ---------- */
-const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', notify: 's-notify', black: 's-black', calm: 's-calm' };
+const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', notify: 's-notify', black: 's-black', calm: 's-calm', wolf: 's-wolf' };
 function notifyNote() {
   if (!('Notification' in window)) return 'Not supported in this browser.';
   const p = Notification.permission;
@@ -359,7 +407,7 @@ function renderSettings() {
   const s = settings();
   for (const k in NUM) $(NUM[k]).value = s[k];
   for (const k in BOOLS) $(BOOLS[k]).checked = s[k];
-  $('s-volume').value = s.volume;
+  $('s-volume').value = s.volume; $('s-ambient').value = s.ambient; $('s-ambVol').value = s.ambVol;
   document.querySelectorAll('.sw').forEach(b => b.classList.toggle('on', b.dataset.a === s.accent));
   $('notifyNote').textContent = notifyNote();
   $('dataNote').textContent = `${store.history.length} sessions · ${store.tasks.length} tasks · saved on this device` + (volatile ? ' — WARNING: storage is blocked, data will be lost when you close the app' : '');
@@ -385,11 +433,13 @@ $('s-notify').addEventListener('change', async e => {
   } else applySettings({ notify: false });
 });
 let vt; $('s-volume').addEventListener('input', e => { store.setSettings({ volume: +e.target.value }); clearTimeout(vt); vt = setTimeout(() => { audio.unlock(); audio.play('tap'); }, 90); });
+$('s-ambient').addEventListener('change', e => { audio.unlock(); applySettings({ ambient: e.target.value }); });
+$('s-ambVol').addEventListener('input', e => { store.setSettings({ ambVol: +e.target.value }); syncAmbient(); });
 $('swatches').onclick = e => { const b = e.target.closest('.sw'); if (b) applySettings({ accent: b.dataset.a }); };
 
 /* ---------- backup / restore / reset ---------- */
 $('exportBtn').onclick = async () => {
-  const data = JSON.stringify(store.exportData(), null, 1), name = `solo-leveling-backup-${dkey(Date.now())}.json`;
+  const data = JSON.stringify(store.exportData(), null, 1), name = `zyntry-backup-${dkey(Date.now())}.json`;
   try {
     const file = new File([data], name, { type: 'application/json' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); toast('Backup shared'); return; }
@@ -402,7 +452,7 @@ $('importBtn').onclick = () => $('importFile').click();
 $('importFile').onchange = async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   const fail = text => dialog({ title: 'Cannot import', text, buttons: [{ label: 'OK', value: true, primary: true }] });
-  if (f.size > 25e6) return fail('That file is too large to be a Solo Leveling backup.');
+  if (f.size > 25e6) return fail('That file is too large to be a Zyntry backup.');
   let parsed;
   try { parsed = parseBackup(JSON.parse(await f.text())); }
   catch (err) { return fail(err instanceof SyntaxError ? 'The file is not valid JSON.' : err.message || 'The file could not be read.'); }
@@ -430,7 +480,7 @@ $('wipeBtn').onclick = async () => {
 /* ---------- offline / update / install ---------- */
 async function offlineStatus() {
   let txt = 'Not ready yet — open the app once while online.';
-  try { if ('serviceWorker' in navigator && navigator.serviceWorker.controller && (await caches.keys()).some(k => k.startsWith('solo-leveling-'))) txt = 'Ready — works without internet.'; } catch (e) {}
+  try { if ('serviceWorker' in navigator && navigator.serviceWorker.controller && (await caches.keys()).some(k => k.startsWith('zyntry-'))) txt = 'Ready — works without internet.'; } catch (e) {}
   $('offNote').textContent = txt;
 }
 function renderChip() {
@@ -476,6 +526,8 @@ applyTheme();
 if (settings().notify && (!('Notification' in window) || Notification.permission !== 'granted')) store.setSettings({ notify: false });
 if (timer.completed >= settings().rounds) timer = { ...timer, completed: 0 };
 renderAll();
+booted = true;
+setTimeout(() => wolf.say(timer.running ? wolf.line(timer.mode === 'focus' ? 'focus' : 'rest') : (new Date().getHours() < 12 ? 'Good morning! ' : new Date().getHours() < 18 ? 'Hey there! ' : 'Evening hunt? ') + wolf.line('idle')), 700);
 setInterval(tick, 250);
 if (timer.running) { lockScreen(); tick(); }
 if (store.warnings.length) setTimeout(() => toast('Some saved data could not be read. A copy was kept on this device.', 5000), 600);

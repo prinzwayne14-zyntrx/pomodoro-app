@@ -1,10 +1,14 @@
-# Solo Leveling
+# Zyntry
 
-An offline-first focus timer for iPhone, Android, tablet and desktop that turns discipline into progression.
+An offline-first focus timer for iPhone, Android, tablet and desktop — with **Zyn**, an animated wolf companion who focuses, rests and levels up with you.
 Plain HTML/CSS/JS (ES modules): **no build step, no dependencies, no accounts, no servers.** Hosted free on GitHub Pages.
 
 ## Features
 
+- **Zyn the wolf** — animated SVG companion in the timer dial. Focused brows while you work, looks around when paused, sleeps (Zzz) on breaks, bounces when you finish, howls on level-up and daily goal. Tap for encouragement. Gains gear as you rank up: scarf (D/C), star mark (B/A), crown (S). Can be hidden in Settings.
+- **Daily goal** — set a number of focus sessions per day; progress under the timer and in Stats ("goal days" over the last 7 days).
+- **Focus sounds** — rain, brown noise, ocean waves, white noise. Generated on-device (no files, works offline), play only while a focus session runs. Quick toggle next to the task chip.
+- **Streak** in the header, **quick add** a task right from the timer's task picker.
 - **Timer** — focus / short break / long break, custom durations, start · pause · resume · reset · skip, glowing progress ring, 3-second countdown, 1-minute warning. Timestamp-based, so it stays accurate across refreshes, phone locks and long background periods.
 - **Guards** — abandoning a running session (reset, skip, mode change) asks for confirmation. Changing durations never touches a running session.
 - **RPG** — XP, levels, ranks E → D → C → B → A → S, level-up animation, daily/total XP.
@@ -47,6 +51,10 @@ npm run e2e       # browser tests: needs `npm i -D playwright` + a Chromium, and
 
 The e2e suite covers timer persistence, sessions that end while the app is closed, duplicate protection across tabs, XP rules, the abandon guards, tasks, statistics, settings, backup/restore/reset, corrupted and legacy data, four screen sizes (no horizontal scroll, no overlapping controls), offline use and a real service-worker update.
 
+## Icons
+
+The logo lives in `icons/icon.svg`. After editing it run `npm run icons` (needs Playwright) to regenerate the PNGs.
+
 ## Releasing an update
 
 Push to `main`. Bump `VERSION` in `sw.js` **and** `APP_VERSION` in `js/app.js` (a unit test fails if they differ). Installed copies update themselves.
@@ -55,5 +63,5 @@ Push to `main`. Bump `VERSION` in `sw.js` **and** `APP_VERSION` in `js/app.js` (
 
 - iOS suspends web apps when the screen locks or the app is closed: the timer is still correct when you return, but sounds and notifications cannot fire while suspended. Keep the app open during a session (it keeps the screen awake).
 - Notifications only appear while the app is running. True background alerts need a push server, which would not be free or offline.
-- Data lives in the browser's local storage on one device. Use Export backup to move or protect it. Clearing Safari website data deletes it.
+- Data lives in the browser's local storage on one device. Use Export backup to move or protect it. (Data and backups from the app's previous name, Solo Leveling, carry over automatically.) Clearing Safari website data deletes it.
 - The clock is the device clock; changing it can bend stats and XP (unavoidable for an offline app).

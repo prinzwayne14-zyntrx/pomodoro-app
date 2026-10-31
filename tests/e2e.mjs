@@ -42,7 +42,7 @@ const dbtn = (p, name) => p.locator('#dlgBox').getByRole('button', { name, exact
 const ctx = await newCtx();
 await test('boots with no errors and creates versioned storage', async () => {
   const p = await fresh(ctx);
-  eq(await p.title(), 'Solo Leveling'); eq(await p.textContent('#clock'), '25:00');
+  eq(await p.title(), 'Zyntry'); eq(await p.textContent('#clock'), '25:00');
   ok(await p.evaluate(() => !!localStorage.getItem('sl.meta')), 'meta key'); eq(p.errs, []);
   await p.close();
 });
@@ -108,6 +108,26 @@ await test('changing durations never disturbs a running session', async () => {
   const t = await get(p, 'sl.timer'); eq(t.running, true); eq(t.total, 1500000); eq((await get(p, 'sl.settings')).focus, 50); await p.close();
 });
 
+/* ---------- wolf, goal, focus sound ---------- */
+await test('wolf reacts to the timer; goal + streak shown; sound chip cycles; quick-add task', async () => {
+  const p = await fresh(ctx, { 'sl.history': [{ id: 'g1', t: now() - 5000, m: 'focus', s: 1500, c: 1, x: 35 }, { id: 'g0', t: now() - 864e5, m: 'focus', s: 1500, c: 1, x: 35 }] });
+  eq(await p.getAttribute('#wolf', 'data-state'), 'idle'); ok(await p.locator('#wolf svg').count() === 1, 'wolf svg');
+  eq((await p.textContent('#goalTxt')).trim(), '1 / 6 today'); eq(await p.textContent('#streakN'), '2');
+  await p.click('#toggle'); eq(await p.getAttribute('#wolf', 'data-state'), 'focus');
+  await p.click('#toggle'); eq(await p.getAttribute('#wolf', 'data-state'), 'paused');
+  await p.click('#soundChip'); eq(await p.textContent('#soundName'), 'Rain'); eq((await get(p, 'sl.settings')).ambient, 'rain');
+  await p.click('#wolf'); await p.waitForSelector('#bubble.show');
+  await p.click('#taskChip'); await p.fill('#quickTask', 'Ship Zyntry'); await dbtn(p, 'Add & focus');
+  eq(await p.textContent('#taskName'), 'Ship Zyntry'); eq((await get(p, 'sl.tasks')).length, 1);
+  await goto(p, 'settingsView'); await p.uncheck('#s-wolf'); await goto(p, 'timerView');
+  ok(!(await p.isVisible('#wolf')), 'wolf hidden by setting'); eq(p.errs, []); await p.close();
+});
+await test('daily goal reached: wolf howls', async () => {
+  const p = await fresh(ctx, { 'sl.settings': { goal: 1 }, 'sl.timer': T({ running: true, endAt: now() + 1200, sid: 'goal-1' }) });
+  await p.waitForFunction(() => document.getElementById('wolf').dataset.state === 'howl', null, { timeout: 6000 });
+  ok((await p.textContent('#goalTxt')).includes('1 / 1'), 'goal text'); await p.close();
+});
+
 /* ---------- tasks ---------- */
 await test('tasks: create, prioritise, edit, complete, assign to a session, delete', async () => {
   const p = await fresh(ctx); await goto(p, 'tasksView');
@@ -164,7 +184,7 @@ await test('backup export -> reset -> import restores everything; merge is idemp
   await goto(p, 'settingsView');
   const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#exportBtn')]);
   const file = path.join(os.tmpdir(), 'sl-backup-test.json'); await dl.saveAs(file);
-  const j = JSON.parse(fs.readFileSync(file, 'utf8')); eq(j.app, 'solo-leveling'); eq(j.history.length, 2); eq(j.tasks.length, 1); eq(j.summary.totalXp, 70);
+  const j = JSON.parse(fs.readFileSync(file, 'utf8')); eq(j.app, 'zyntry'); eq(j.history.length, 2); eq(j.tasks.length, 1); eq(j.summary.totalXp, 70);
   await p.click('#wipeBtn'); await dbtn(p, 'Cancel'); eq((await get(p, 'sl.history')).length, 2, 'cancel must not erase');
   await p.click('#wipeBtn'); await dbtn(p, 'Erase everything'); await p.waitForTimeout(300);
   eq((await get(p, 'sl.history')).length, 0); await p.reload(); await p.waitForSelector('#clock'); eq((await get(p, 'sl.history')).length, 0, 'reset must stick');
@@ -216,7 +236,7 @@ await test('works offline after the first online load (service worker + cache), 
   const c = await newCtx(); const p = await fresh(c, { 'sl.history': [{ id: 'o1', t: now() - 1e5, m: 'focus', s: 1500, c: 1, x: 35 }] });
   await p.waitForFunction(() => navigator.serviceWorker.controller, null, { timeout: 15000 });
   const cached = await p.evaluate(async () => { const k = await caches.keys(); const c = await caches.open(k[0]); return (await c.keys()).map(r => new URL(r.url).pathname); });
-  for (const f of ['/index.html', '/style.css', '/js/app.js', '/js/rpg.js', '/js/store.js', '/js/timer.js', '/js/audio.js', '/manifest.webmanifest', '/icons/icon-192.png']) ok(cached.includes(f), 'not precached: ' + f);
+  for (const f of ['/index.html', '/style.css', '/js/app.js', '/js/rpg.js', '/js/store.js', '/js/timer.js', '/js/audio.js', '/js/wolf.js', '/manifest.webmanifest', '/icons/icon-192.png']) ok(cached.includes(f), 'not precached: ' + f);
   await c.setOffline(true); await p.reload(); await p.waitForSelector('#clock');
   eq(await p.textContent('#xpNum'), '35 / 100 XP'); ok((await p.textContent('#chip')).includes('Offline'), 'offline chip');
   await p.click('#toggle'); eq((await get(p, 'sl.timer')).running, true);          // fully usable offline
@@ -225,7 +245,7 @@ await test('works offline after the first online load (service worker + cache), 
 });
 await test('manifest + icons are valid for installation', async () => {
   const p = await ctx.newPage(); const m = await (await p.goto('http://127.0.0.1:8123/manifest.webmanifest')).json();
-  eq(m.display, 'standalone'); ok(m.name === 'Solo Leveling' && m.start_url && m.icons.some(i => i.sizes === '512x512') && m.icons.some(i => i.sizes === '192x192'), 'manifest fields');
+  eq(m.display, 'standalone'); ok(m.name === 'Zyntry' && m.start_url && m.icons.some(i => i.sizes === '512x512') && m.icons.some(i => i.sizes === '192x192'), 'manifest fields');
   for (const i of m.icons) { const r = await p.request.get('http://127.0.0.1:8123/' + i.src); ok(r.ok(), i.src); }
   await p.close();
 });
@@ -235,11 +255,11 @@ await test('service-worker update: new version is picked up automatically, user 
   await p.goto('http://127.0.0.1:8124/index.html'); await p.evaluate(() => localStorage.clear()); await p.reload();
   await p.waitForFunction(() => navigator.serviceWorker.controller, null, { timeout: 15000 });
   await p.evaluate(() => { localStorage.setItem('sl.history', JSON.stringify([{ id: 'u1', t: Date.now() - 1e5, m: 'focus', s: 1500, c: 1, x: 35 }])); window.__marker = 1; });
-  fs.writeFileSync(path.join(tmp, 'sw.js'), fs.readFileSync(path.join(tmp, 'sw.js'), 'utf8').replace("VERSION = '3.0.0'", "VERSION = '3.0.1-test'"));
+  fs.writeFileSync(path.join(tmp, 'sw.js'), fs.readFileSync(path.join(tmp, 'sw.js'), 'utf8').replace("VERSION = '4.0.0'", "VERSION = '4.0.1-test'"));
   await p.evaluate(() => navigator.serviceWorker.getRegistration().then(r => r.update()));
   await p.waitForFunction(() => !window.__marker, null, { timeout: 15000 });             // page reloaded itself
   await p.waitForSelector('#clock');
-  const keys = await p.evaluate(() => caches.keys()); eq(keys.sort(), ['solo-leveling-3.0.1-test']); // old cache removed
+  const keys = await p.evaluate(() => caches.keys()); eq(keys.sort(), ['zyntry-4.0.1-test']); // old cache removed
   eq((await get(p, 'sl.history')).length, 1, 'data must survive an update'); eq(await p.textContent('#xpNum'), '35 / 100 XP');
   await c.close(); s2.kill();
 });

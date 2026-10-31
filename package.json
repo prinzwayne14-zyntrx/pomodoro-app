@@ -1,11 +1,12 @@
 {
-  "name": "solo-leveling",
-  "version": "3.0.0",
+  "name": "zyntry",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Solo Leveling — offline-first focus timer PWA (no build step, no runtime dependencies).",
+  "description": "Zyntry — offline-first focus timer PWA (no build step, no runtime dependencies).",
   "scripts": {
     "test": "node --test tests/core.test.mjs",
-    "e2e": "node tests/e2e.mjs"
+    "e2e": "node tests/e2e.mjs",
+    "icons": "node tools/icons.cjs"
   }
 }

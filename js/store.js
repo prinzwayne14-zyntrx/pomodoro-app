@@ -5,9 +5,11 @@ import { dkey, xpFor } from './rpg.js';
 export const DATA_VERSION = 2;
 export const MODES = ['focus', 'short', 'long'];
 export const ACCENTS = ['blue', 'violet', 'crimson', 'gold'];
-export const DEFAULT_SETTINGS = { focus: 25, short: 5, long: 15, rounds: 4, auto: false, sound: true, volume: 70, ticks: true, notify: false, accent: 'blue', black: false, calm: false };
-const LIM = { focus: [1, 180], short: [1, 60], long: [1, 90], rounds: [2, 10] };
-const BOOL = ['auto', 'sound', 'ticks', 'notify', 'black', 'calm'];
+export const AMBIENTS = ['off', 'rain', 'brown', 'waves', 'white'];
+export const DEFAULT_SETTINGS = { focus: 25, short: 5, long: 15, rounds: 4, goal: 6, auto: false, sound: true, volume: 70, ticks: true, notify: false, accent: 'blue', black: false, calm: false, wolf: true, ambient: 'off', ambVol: 50 };
+const LIM = { focus: [1, 180], short: [1, 60], long: [1, 90], rounds: [2, 10], goal: [1, 20] };
+const BOOL = ['auto', 'sound', 'ticks', 'notify', 'black', 'calm', 'wolf'];
+export const BACKUP_APPS = ['zyntry', 'solo-leveling'];   // backups from the app's previous name still import
 const KEYS = { settings: 'sl.settings', timer: 'sl.timer', history: 'sl.history', tasks: 'sl.tasks', meta: 'sl.meta' };
 
 const clampInt = (v, [a, b], d) => { v = Math.round(Number(v)); return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d; };
@@ -20,7 +22,9 @@ export function cleanSettings(s) {
   for (const k in LIM) o[k] = clampInt(s[k], LIM[k], DEFAULT_SETTINGS[k]);
   for (const k of BOOL) if (typeof s[k] === 'boolean') o[k] = s[k];
   o.volume = clampInt(s.volume, [0, 100], DEFAULT_SETTINGS.volume);
+  o.ambVol = clampInt(s.ambVol, [0, 100], DEFAULT_SETTINGS.ambVol);
   if (ACCENTS.includes(s.accent)) o.accent = s.accent;
+  if (AMBIENTS.includes(s.ambient)) o.ambient = s.ambient;
   return o;
 }
 export function cleanSession(h) {
@@ -69,7 +73,7 @@ function dedupe(list, keyOf) { const seen = new Set(), out = []; for (const x of
 
 /* ---------- backup parsing (pure) ---------- */
 export function parseBackup(obj) {
-  if (!obj || typeof obj !== 'object' || obj.app !== 'solo-leveling') throw new Error('This file is not a Solo Leveling backup.');
+  if (!obj || typeof obj !== 'object' || !BACKUP_APPS.includes(obj.app)) throw new Error('This file is not a Zyntry backup.');
   if (Number(obj.version) > DATA_VERSION) throw new Error('This backup was made by a newer version of the app. Update the app first.');
   if (!Array.isArray(obj.history) || !Array.isArray(obj.tasks)) throw new Error('The backup is missing session or task data.');
   const sessions = dedupe(obj.history.map(cleanSession).filter(Boolean), s => s.id);
@@ -157,7 +161,7 @@ export function createStore(storage) {
 
   /* backup / restore / reset */
   S.exportData = () => ({
-    app: 'solo-leveling', version: DATA_VERSION, exportedAt: new Date().toISOString(),
+    app: 'zyntry', version: DATA_VERSION, exportedAt: new Date().toISOString(),
     settings: S.settings, history: S.history, tasks: S.tasks, summary: { sessions: S.history.length, tasks: S.tasks.length, totalXp: S.totalXp() }
   });
   S.importData = (parsed, how) => {

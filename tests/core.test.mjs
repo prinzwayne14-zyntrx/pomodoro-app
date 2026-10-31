@@ -134,6 +134,8 @@ test('backup export/import round trip, merge without duplicates, replace keeps a
   b.importData(p, 'replace');
   assert.equal(b.history.length, 2);
   assert.ok(JSON.parse(bm.getItem('sl.prerestore')).history.some(h => h.id === 'extra'));   // nothing silently lost
+  assert.equal(json.app, 'zyntry');
+  assert.equal(parseBackup({ ...json, app: 'solo-leveling' }).sessions.length, 2);   // backups from the old app name still import
   assert.throws(() => parseBackup({ app: 'other' }));
   assert.throws(() => parseBackup({ app: 'solo-leveling', version: 99, history: [], tasks: [] }));
   assert.throws(() => parseBackup(null));

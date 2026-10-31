@@ -1,7 +1,7 @@
 // Bump VERSION on each release (and APP_VERSION in js/app.js; a unit test checks they match).
 // User data lives in localStorage, which a service-worker update never touches.
-const VERSION = '3.0.0';
-const CACHE = 'solo-leveling-' + VERSION;
+const VERSION = '4.0.0';
+const CACHE = 'zyntry-' + VERSION;
 const ASSETS = [
   './',
   'index.html',
@@ -11,10 +11,12 @@ const ASSETS = [
   'js/store.js',
   'js/timer.js',
   'js/audio.js',
+  'js/wolf.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
-  'icons/apple-touch-icon.png'
+  'icons/apple-touch-icon.png',
+  'icons/icon.svg'
 ];
 
 self.addEventListener('install', e => {
@@ -25,7 +27,8 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith('solo-leveling-') && k !== CACHE).map(k => caches.delete(k))))
+      // also clears caches left by the app's previous name
+      .then(keys => Promise.all(keys.filter(k => (k.startsWith('zyntry-') || k.startsWith('solo-leveling-')) && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
