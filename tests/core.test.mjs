@@ -171,7 +171,7 @@ test('stats are computed from recorded sessions', () => {
   assert.equal(s.streak, 3); assert.equal(s.best, 3);
   assert.equal(s.weekSec, 2100 + 1500 * 3 + 300); assert.equal(s.totalSec, 8400);
   assert.equal(s.totalXp, 175);
-  assert.equal(s.week.length, 7); assert.equal(s.heat.length, 28);
+  assert.equal(s.week.length, 7); assert.equal(s.heat.length, 84);
   assert.equal(s.tasksDoneToday, 1); assert.equal(s.tasksDoneTotal, 2);
   assert.equal(stats(h, tasks, NOW, 120).todaySec, 2220);          // live (in-progress) seconds are added on top
 });
@@ -187,4 +187,22 @@ test('app and service-worker versions match', () => {
   const sw = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8').match(/VERSION = '([^']+)'/)[1];
   const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8').match(/APP_VERSION = '([^']+)'/)[1];
   assert.equal(sw, app);
+});
+
+test('rank titles and progress to the next rank', async () => {
+  const { rankInfo } = await import('../js/rpg.js');
+  const r = rankInfo(0); assert.equal(r.r, 'E'); assert.equal(r.title, 'Novice'); assert.equal(r.next.r, 'D'); assert.equal(r.xpToGo, T(5));
+  const s = rankInfo(T(40) + 5); assert.equal(s.r, 'S'); assert.equal(s.next, null); assert.equal(s.frac, 1);
+});
+test('discipline points drive evolution; vitality follows recent routine', async () => {
+  const { discipline } = await import('../js/rpg.js');
+  assert.equal(discipline([], NOW).stage.name, 'Pup'); assert.equal(discipline([], NOW).vitality, 'new');
+  const h = [];
+  for (let d = 0; d < 5; d++) for (let k = 0; k < 4; k++) h.push({ id: d + '-' + k, t: NOW - d * DAY - k * 60000, m: 'focus', s: 1500, c: 1, x: 35 });
+  h.push({ id: 'cut', t: NOW, m: 'focus', s: 1500, c: 0, x: 0 });            // interrupted: no credit
+  const d = discipline(h, NOW);
+  assert.equal(d.active, 5); assert.equal(d.strong, 5); assert.equal(d.best, 5); assert.equal(d.points, 5 + 10 + 10);
+  assert.equal(d.stage.name, 'Scout'); assert.equal(d.next.name, 'Hunter'); assert.equal(d.toGo, 15); assert.equal(d.vitality, 'strong');
+  assert.equal(discipline(h, NOW + 3 * DAY).vitality, 'tired'); assert.equal(discipline(h, NOW + 9 * DAY).vitality, 'lonely');
+  assert.equal(discipline(h, NOW + 9 * DAY).stage.name, 'Scout');            // evolution is never lost
 });

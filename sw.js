@@ -1,6 +1,6 @@
 // Bump VERSION on each release (and APP_VERSION in js/app.js; a unit test checks they match).
 // User data lives in localStorage, which a service-worker update never touches.
-const VERSION = '4.0.0';
+const VERSION = '5.0.0';
 const CACHE = 'zyntry-' + VERSION;
 const ASSETS = [
   './',
@@ -47,4 +47,13 @@ self.addEventListener('fetch', e => {
       caches.match(req, { ignoreSearch: true }).then(hit => hit || caches.match(req.mode === 'navigate' ? 'index.html' : req))
     )
   );
+});
+
+// Tapping a notification opens (or focuses) the app.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if ('focus' in c) return c.focus();
+    return self.clients.openWindow ? self.clients.openWindow('./') : null;
+  }));
 });

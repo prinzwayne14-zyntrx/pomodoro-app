@@ -1,10 +1,10 @@
-import { levelOf, levelInfo, rankOf, stats, dkey, agoKey, xpFor } from './rpg.js';
+import { levelOf, levelInfo, rankOf, rankInfo, RANKS, stats, dkey, agoKey, xpFor, discipline, STAGES, STRONG_DAY, dayparts, DAYPARTS } from './rpg.js';
 import { createStore, parseBackup } from './store.js';
 import * as TM from './timer.js';
 import { createAudio } from './audio.js';
 import { createWolf, wolfSVG } from './wolf.js';
 
-const APP_VERSION = '4.0.0';
+const APP_VERSION = '5.0.0';
 const APP_NAME = 'Zyntry';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -104,14 +104,17 @@ function renderTimer() {
   for (let i = 0; i < settings().rounds; i++) { const d = document.createElement('span'); d.className = 'dot' + (i < timer.completed ? ' done' : ''); dots.appendChild(d); }
   $('taskName').textContent = (timer.task && store.taskTitle(timer.task)) || 'None';
   const li = levelInfo(store.totalXp());
-  const tier = { E: 0, D: 1, C: 1, B: 2, A: 2, S: 3 }[li.rank];
-  wolf.tier(tier); $('lvlWolf').dataset.tier = String(tier);
+  const dz = discipline(store.history, Date.now());
+  wolf.stage(dz.stage.n); wolf.mood(dz.vitality); $('lvlWolf').dataset.stage = String(dz.stage.n);
+  $('player').dataset.rank = li.rank; $('rankName').textContent = 'Rank ' + li.rank + ' · ' + RANKS.find(r => r.r === li.rank).title;
+  $('stageName').textContent = dz.stage.name;
+  checkEvolution(dz);
   wolf.set(timer.running ? (timer.mode === 'focus' ? 'focus' : 'rest') : TM.inProgress(timer) ? 'paused' : 'idle', { talk: booted });
   const td = todayInfo();
   $('goalTxt').innerHTML = `<b>${td.n}</b> / ${settings().goal} today`; $('goalTxt').classList.toggle('met', td.n >= settings().goal);
   $('streakN').textContent = td.streak; $('streakChip').classList.toggle('hot', td.streak > 0);
   syncAmbient();
-  $('lvNum').textContent = li.level; $('rankLetter').textContent = li.rank; $('rankName').textContent = 'Rank ' + li.rank;
+  $('lvNum').textContent = li.level; $('rankLetter').textContent = li.rank;
   $('xpNum').textContent = li.into + ' / ' + li.need + ' XP'; $('xpBar').style.width = (li.into / li.need * 100) + '%';
   lastClock = ''; renderClock();
 }
@@ -124,6 +127,7 @@ function todayInfo() {
   const s = stats(store.history, store.tasks, Date.now());
   return { n: s.todayN, streak: s.streak };
 }
+$('stageChip').onclick = () => { audio.unlock(); audio.play('tap'); go('statsView'); };
 $('wolf').onclick = () => { audio.unlock(); audio.play('tap'); buzz(15); wolf.react('happy', 1800, wolf.line('tap')); };
 const AMB_NAMES = { off: 'Off', rain: 'Rain', brown: 'Brown noise', waves: 'Waves', white: 'White noise' };
 const AMB_ORDER = ['off', 'rain', 'brown', 'waves', 'white'];
@@ -144,15 +148,25 @@ async function lockScreen() { try { if ('wakeLock' in navigator && timer.running
 function unlockScreen() { try { wake && wake.release(); } catch (e) {} wake = null; }
 
 /* ---------- notifications ---------- */
-function notify(title, body) {
-  if (!settings().notify || !('Notification' in window) || Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible') return;      // in-app sound and toast cover the visible case
+// Banner at the top of the screen. Shown whether the app is open or in the background
+// (iOS: needs the app on the Home Screen, iOS 16.4+). One tag, so a newer banner replaces an older one.
+function notify(title, body, force = false) {
+  if ((!settings().notify && !force) || !('Notification' in window) || Notification.permission !== 'granted') return;
   try {
-    const opts = { body, icon: 'icons/icon-192.png', tag: 'sl-session' };
+    const opts = { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'zyntry', renotify: true, silent: false, vibrate: [200, 100, 200], data: { url: location.href } };
     (navigator.serviceWorker ? navigator.serviceWorker.getRegistration() : Promise.resolve(null))
       .then(r => r ? r.showNotification(title, opts) : new Notification(title, opts)).catch(() => {});
   } catch (e) {}
 }
+
+/* ---------- alarm: the end sound repeats (3x) until you touch the screen ---------- */
+let alarmT = [];
+function stopAlarm() { alarmT.forEach(clearTimeout); alarmT = []; }
+function alarm(name) {
+  stopAlarm(); audio.play(name);
+  if (settings().alarm) for (let i = 1; i < 3; i++) alarmT.push(setTimeout(() => audio.play(name), i * 3200));
+}
+addEventListener('pointerdown', stopAlarm, true);
 
 /* ---------- timer actions ---------- */
 let countSec = null, warned = null, reloadPending = false;
@@ -216,29 +230,46 @@ function finish(n) {
   if (!auto) unlockScreen();
 
   if (t.mode === 'focus') {
-    if (fresh) { audio.play('focusDone'); buzz([200, 100, 200, 100, 300]); }
+    if (fresh) { alarm('focusDone'); buzz([200, 100, 200, 100, 300]); }
     const g = settings().goal, goalNow = todayInfo().n;
     if (added && goalBefore < g && goalNow >= g) { wolf.react('howl', 3600, wolf.line('goal')); setTimeout(() => toast(`Daily goal reached · ${goalNow}/${g} 🎯`, 3600), 3700); }
     else if (added) wolf.react('happy', 3200, wolf.line('done') + (entry.x ? ` +${entry.x} XP` : ''));
     if (added) toast(entry.x ? `Session complete · +${entry.x} XP` : 'Session complete · no XP (under 10 min)', 3600);
-    notify('Focus session complete', entry && entry.x ? `+${entry.x} XP. Time for a break.` : 'Time for a break.');
+    notify('🐺 Focus complete!', (entry && entry.x ? `+${entry.x} XP. ` : '') + (nx.mode === 'long' ? `Long break: ${settings().long} min. You earned it.` : `Take a ${settings().short}-min break.`) + (t.task && store.taskTitle(t.task) ? ` · ${store.taskTitle(t.task)}` : ''));
   } else {
-    if (fresh) { audio.play('breakDone'); buzz([200, 100, 200]); }
+    if (fresh) { alarm('breakDone'); buzz([200, 100, 200]); }
     toast('Break over — ready to focus', 3000); wolf.react('happy', 2200, 'Break’s over. Back on the hunt?');
-    notify('Break is over', 'Ready for the next focus session?');
+    notify('⏰ Break is over', `Zyn is ready. Next: ${settings().focus}-min focus.`);
   }
   if (!fresh) toast('Your session finished while you were away', 4000);
   if (leveled) setTimeout(() => levelUp(leveled[0], leveled[1]), fresh ? 700 : 200);
   renderAll();
 }
 
-function levelUp(a, b) {
-  $('lvlN').textContent = b;
-  $('lvlS').textContent = rankOf(b) !== rankOf(a) ? 'Rank up · ' + rankOf(a) + ' → ' + rankOf(b) : 'Rank ' + rankOf(b);
-  $('lvl').classList.add('show'); wolf.react('howl', 3200); audio.play('levelUp'); buzz([60, 40, 60, 40, 200]);
-  clearTimeout(levelUp.t); levelUp.t = setTimeout(() => $('lvl').classList.remove('show'), 3200);
+const celebrateQ = [];
+function celebrate(c) {
+  if ($('lvl').classList.contains('show')) { celebrateQ.push(c); return; }
+  $('lvlT').textContent = c.kicker; $('lvlN').textContent = c.big; $('lvlS').textContent = c.sub;
+  $('lvl').dataset.kind = c.kind; $('lvl').classList.add('show');
+  wolf.react('howl', 3200); audio.play(c.sound); buzz([60, 40, 60, 40, 200]);
+  clearTimeout(celebrate.t); celebrate.t = setTimeout(closeCelebrate, c.ms || 3400);
 }
-$('lvl').onclick = () => $('lvl').classList.remove('show');
+function closeCelebrate() { $('lvl').classList.remove('show'); const n = celebrateQ.shift(); if (n) setTimeout(() => celebrate(n), 250); }
+function levelUp(a, b) {
+  const ra = rankOf(a), rb = rankOf(b);
+  if (ra !== rb) {
+    const t = RANKS.find(r => r.r === rb).title;
+    celebrate({ kind: 'rank', kicker: 'RANK UP', big: rb, sub: `${t} · Level ${b}`, sound: 'rankUp', ms: 4200 });
+  } else celebrate({ kind: 'level', kicker: 'LEVEL UP', big: String(b), sub: 'Rank ' + rb + ' · ' + RANKS.find(r => r.r === rb).title, sound: 'levelUp' });
+}
+// Zyn evolves when discipline points cross a stage. Stored so it is celebrated once.
+function checkEvolution(dz) {
+  let seen = 0; try { seen = +storage.getItem('sl.evo') || 0; } catch (e) {}
+  if (seen === dz.stage.n) return;
+  try { storage.setItem('sl.evo', String(dz.stage.n)); } catch (e) {}
+  if (seen && dz.stage.n > seen) setTimeout(() => celebrate({ kind: 'evolve', kicker: 'ZYN EVOLVED', big: dz.stage.name, sub: dz.stage.note, sound: 'evolve', ms: 4600 }), 900);
+}
+$('lvl').onclick = () => { clearTimeout(celebrate.t); closeCelebrate(); };
 
 function tick() {
   const n = Date.now();
@@ -247,7 +278,7 @@ function tick() {
     const ms = TM.remaining(timer, n), s = Math.ceil(ms / 1000);
     if (settings().ticks && s <= 3 && s !== countSec && document.visibilityState === 'visible') { countSec = s; audio.play('count'); }
     if (timer.mode === 'focus' && timer.total > 180000 && s <= 60 && s >= 57 && warned !== timer.sid) {
-      warned = timer.sid; toast('1 minute left'); notify('1 minute left', 'Finish strong.');
+      warned = timer.sid; toast('1 minute left'); audio.play('warn'); notify('⏳ 1 minute left', 'Finish strong.');
     }
     renderClock();
   } else if (reloadPending && !$('dlg').classList.contains('open')) { location.reload(); return; }
@@ -350,13 +381,27 @@ function goalDays() {
   let n = 0; for (let i = 0; i < 7; i++) if ((per.get(agoKey(i)) || 0) >= g) n++;
   return n;
 }
+const VITALITY = {
+  new: ['Fresh start', 'Finish a 10+ min focus session to start Zyn’s journey.'],
+  strong: ['Energetic', 'Your routine is strong. Keep the streak alive.'],
+  tired: ['Sleepy', 'A couple of days off. One session wakes Zyn up.'],
+  lonely: ['Misses you', 'Zyn is waiting. Start with a short session.']
+};
+const ICON = {
+  clock: '<path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8.5"/>', cal: '<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+  avg: '<path d="M4 18l5-6 4 3 7-9"/>', trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8"/>',
+  fire: '<path d="M12 3c1 3.5 5 6 5 11a5 5 0 0 1-10 0c0-2.3 1-3.8 2.2-5 .2 1.6.9 2.7 2 3.2C11 9.5 11 6 12 3z"/>', check: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+  pct: '<path d="M6 18L18 6"/><circle cx="7.5" cy="7.5" r="2"/><circle cx="16.5" cy="16.5" r="2"/>', bolt: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  sum: '<path d="M17 5H7l6 7-6 7h10"/>', task: '<path d="M9 7h11M9 12h11M9 17h11M4 7l1 1 2-2M4 12l1 1 2-2M4 17l1 1 2-2"/>'
+};
+const ic = k => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+let zynSvg = null;
 function renderStats() {
-  const live = liveSec(), s = stats(store.history, store.tasks, Date.now(), live), li = levelInfo(store.totalXp());
-  const max = Math.max(1, ...s.week.map(d => d.sec));
-  const lvl = d => { const m = d.sec / 60; return m <= 0 ? '' : m < 15 ? 'l1' : m < 45 ? 'l2' : m < 90 ? 'l3' : 'l4'; };
-  const card = (k, v, u) => `<div class="glass card"><div class="k">${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ''}</div></div>`;
+  const now = Date.now(), live = liveSec(), s = stats(store.history, store.tasks, now, live), xp = store.totalXp(), li = levelInfo(xp), rk = rankInfo(xp);
+  const dz = discipline(store.history, now), goal = settings().goal;
+  const card = (k, v, u, i) => `<div class="glass card"><div class="k">${i ? ic(i) : ''}${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ''}</div></div>`;
   if (sortedRev !== store.rev) { sortedRev = store.rev; sortedHist = store.history.filter(h => h.m === 'focus').sort((a, b) => b.t - a.t); }
-  const tk = dkey(Date.now()), yk = agoKey(1);
+  const tk = dkey(now), yk = agoKey(1);
   let hist = '', lastDay = '';
   for (const h of sortedHist.slice(0, histShown)) {
     const k = dkey(h.t);
@@ -365,43 +410,125 @@ function renderStats() {
     hist += `<div class="hrow"><span class="dur">${Math.max(1, Math.round(h.s / 60))}m</span><span class="info">${new Date(h.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${title ? ' · ' + esc(title) : ''}</span>` +
       (h.c ? (h.x ? `<span class="badge ok">+${h.x} XP</span>` : '<span class="badge zero">No XP</span>') : '<span class="badge cut">Interrupted</span>') + '</div>';
   }
+  // goal ring
+  const gf = Math.min(1, s.todayN / goal), GR = 42, GC = 2 * Math.PI * GR;
+  const ring = `<svg viewBox="0 0 100 100" class="gsvg"><circle cx="50" cy="50" r="${GR}" class="gtrack"/><circle cx="50" cy="50" r="${GR}" class="gbar" style="stroke-dasharray:${GC};stroke-dashoffset:${GC * (1 - gf)}"/></svg>`;
+  // week bars (minutes), average line, labels only on today + best day
+  const max = Math.max(1, ...s.week.map(d => d.sec)), avgPct = s.avg7 / max * 100, bi = s.week.findIndex(d => d.sec === max && d.sec > 0);
+  const bars = s.week.map((d, i) => `<div class="col ${i === 6 ? 'today' : ''} ${d.sec > 0 ? 'has' : ''}" data-tip="${new Date(d.k + 'T12:00').toLocaleDateString(undefined, { weekday: 'long' })}: ${d.sec ? fmtMin(d.sec) : 'no focus'}"><b>${(i === 6 || i === bi) && d.sec > 0 ? fmtMin(d.sec) : ''}</b><div class="slot"><i style="height:${Math.max(2, Math.round(d.sec / max * 100))}%"></i></div><span>${'SMTWTFS'[d.dow]}</span></div>`).join('');
+  // dayparts
+  const dp = dayparts(store.history), dmax = Math.max(...dp), best = dmax > 0 ? dp.indexOf(dmax) : -1;
+  const parts = DAYPARTS.map(([n], i) => `<div class="dp ${i === best ? 'best' : ''}" data-tip="${n}: ${fmtMin(dp[i])} total"><span>${n}</span><div class="dpbar"><i style="width:${dmax ? Math.max(dp[i] ? 3 : 0, dp[i] / dmax * 100) : 0}%"></i></div><b>${dp[i] ? fmtMin(dp[i]) : '–'}</b></div>`).join('');
+  // calendar heatmap: whole weeks, columns = weeks, rows = Sun..Sat, ending today
+  const cells = s.heat.slice(s.heat.length - (77 + dow0(tk) + 1));
+  const lvl = d => { const m = d.sec / 60; return m <= 0 ? '' : m < 25 ? 'l1' : m < 60 ? 'l2' : m < 120 ? 'l3' : 'l4'; };
+  const heat = cells.map((d, i) => `<i class="${lvl(d)} ${i === cells.length - 1 ? 'now' : ''}" data-tip="${new Date(d.k + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: ${d.sec ? fmtMin(d.sec) : 'no focus'}"></i>`).join('');
+  // discipline: last 14 days
+  const d14 = dz.d14.map(d => `<i class="${d.n >= STRONG_DAY ? 'strong' : d.n ? 'act' : ''}" data-tip="${new Date(d.k + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}: ${d.n} XP session${d.n === 1 ? '' : 's'}"></i>`).join('');
+  const [vName, vText] = VITALITY[dz.vitality];
+  const stagesRow = STAGES.map(st => `<span class="${st.n <= dz.stage.n ? 'got' : ''} ${st.n === dz.stage.n ? 'cur' : ''}" data-tip="${st.name}: ${st.min} pts · ${st.note}">${st.name.split(' ')[0]}</span>`).join('');
+  const ladder = RANKS.map(r => `<span class="${RANKS.indexOf(r) <= RANKS.findIndex(x => x.r === rk.r) ? 'got' : ''} ${r.r === rk.r ? 'cur' : ''}" data-rank="${r.r}" data-tip="Rank ${r.r} · ${r.title} — from level ${r.min}">${r.r}</span>`).join('');
   const html = `
-    <div class="glass hero">
-      <div><div class="k">${live ? '<span class="live"></span>' : ''}Today</div><div class="big">${fmtMin(s.todaySec)}</div></div>
-      <div style="text-align:center"><div class="k">XP today</div><div class="big">${s.todayXp}</div></div>
-      <div style="text-align:right"><div class="k">Sessions</div><div class="big">${s.todayN}</div></div>
+    <div class="glass hero2">
+      <div class="gring ${gf >= 1 ? 'met' : ''}">${ring}<div class="gin"><b>${s.todayN}</b><small>/ ${goal}</small><span>goal</span></div></div>
+      <div class="hstats">
+        <div class="k">${live ? '<span class="live"></span>' : ''}Focus today</div>
+        <div class="big">${fmtMin(s.todaySec)}</div>
+        <div class="mini"><span><b>+${s.todayXp}</b> XP</span><span><b>${s.todayN}</b> sessions</span><span><b>${s.tasksDoneToday}</b> tasks</span></div>
+      </div>
     </div>
+
+    <div class="glass zyn">
+      <div class="ztop">
+        <div class="wolf mini" id="zynStat" data-state="idle" data-stage="${dz.stage.n}" data-mood="${dz.vitality}"></div>
+        <div class="zinfo">
+          <div class="k">Zyn · Evolution</div>
+          <div class="zname">${dz.stage.name}<small>Stage ${dz.stage.n} of ${STAGES.length}</small></div>
+          <div class="bar"><i style="width:${dz.frac * 100}%"></i></div>
+          <div class="zsub">${dz.next ? `<b>${dz.points}</b> / ${dz.next.min} discipline pts → ${dz.next.name}` : `<b>${dz.points}</b> discipline pts · fully evolved`}</div>
+          <div class="vit v-${dz.vitality}"><i></i>${vName} — ${vText}</div>
+        </div>
+      </div>
+      <div class="steps">${stagesRow}</div>
+      <div class="earn"><span>+1 each active day</span><span>+2 strong day (${STRONG_DAY}+ sessions)</span><span>+2 per best-streak day</span></div>
+    </div>
+
+    <div class="glass rankc" data-rank="${rk.r}">
+      <div class="emblem"><span>${rk.r}</span></div>
+      <div class="zinfo">
+        <div class="k">Rank</div>
+        <div class="zname">${rk.title}<small>Level ${li.level}</small></div>
+        <div class="bar"><i style="width:${rk.frac * 100}%"></i></div>
+        <div class="zsub">${rk.next ? `${rk.xpToGo.toLocaleString()} XP to Rank ${rk.next.r} · ${rk.next.title} (Lv ${rk.next.min})` : 'Highest rank reached. Legendary.'}</div>
+      </div>
+      <div class="ladder">${ladder}</div>
+    </div>
+
+    <div class="glass chart disc">
+      <div class="chead"><div><div class="k">Discipline · 14 days</div><div class="big">${dz.score}<small>/100</small></div></div>
+        <div class="cnote">Showed up <b>${dz.a14}</b> of 14 days<br><b>${dz.s14}</b> strong days</div></div>
+      <div class="d14">${d14}</div>
+      <div class="legend"><span><i></i>No focus</span><span><i class="act"></i>Active</span><span><i class="strong"></i>Strong (${STRONG_DAY}+)</span></div>
+    </div>
+
+    <div class="glass chart">
+      <div class="chead"><div class="k">Last 7 days</div><div class="cnote">avg <b>${fmtMin(s.avg7)}</b>/day</div></div>
+      <div class="bars">${s.avg7 > 0 ? `<div class="avgline" style="bottom:calc(${avgPct}% * .78 + 22px)"><span>avg</span></div>` : ''}${bars}</div>
+    </div>
+
+    <div class="glass chart">
+      <div class="chead"><div class="k">Best time to focus</div></div>
+      <div class="dps">${parts}</div>
+      <div class="insight">${best >= 0 ? `You focus best in the <b>${DAYPARTS[best][0].toLowerCase()}</b>. Plan your hardest task then.` : 'Finish a few sessions to discover your best focus time.'}</div>
+    </div>
+
+    <div class="glass chart">
+      <div class="chead"><div class="k">Last 12 weeks</div><div class="legend"><span>Less</span><i></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i><span>More</span></div></div>
+      <div class="heat">${heat}</div>
+    </div>
+
     <div class="grid">
-      ${card('This week', fmtMin(s.weekSec))}${card('This month', fmtMin(s.monthSec))}
-      ${card('Daily average', fmtMin(s.avg7), '7 days')}${card('Best day', fmtMin(s.bestDay))}
-      ${card('Day streak', s.streak, s.streak === 1 ? 'day' : 'days')}${card('Best streak', s.best, s.best === 1 ? 'day' : 'days')}
-      ${card('Sessions done', s.done)}${card('Completion', s.rate == null ? '–' : s.rate, s.rate == null ? '' : '%')}
-      ${card('Total focus', fmtMin(s.totalSec))}${card('Total XP', s.totalXp.toLocaleString())}
-      ${card('Daily goal', s.todayN + ' / ' + settings().goal, 'sessions')}${card('Goal days', goalDays(s), 'last 7')}
-      ${card('Level', li.level, 'Rank ' + li.rank)}${card('Tasks done', s.tasksDoneToday, 'today · ' + s.tasksDoneTotal + ' total')}
+      ${card('This week', fmtMin(s.weekSec), '', 'cal')}${card('This month', fmtMin(s.monthSec), '', 'cal')}
+      ${card('Daily average', fmtMin(s.avg7), '7 days', 'avg')}${card('Best day', fmtMin(s.bestDay), '', 'trophy')}
+      ${card('Day streak', s.streak, s.streak === 1 ? 'day' : 'days', 'fire')}${card('Best streak', s.best, s.best === 1 ? 'day' : 'days', 'fire')}
+      ${card('Sessions done', s.done, '', 'check')}${card('Completion', s.rate == null ? '–' : s.rate, s.rate == null ? '' : '%', 'pct')}
+      ${card('Total focus', fmtMin(s.totalSec), '', 'clock')}${card('Total XP', s.totalXp.toLocaleString(), '', 'bolt')}
+      ${card('Goal days', goalDays(), 'last 7', 'trophy')}${card('Tasks done', s.tasksDoneToday, 'today · ' + s.tasksDoneTotal + ' total', 'task')}
     </div>
-    <div class="glass chart"><div class="k">Last 7 days</div>
-      <div class="bars">${s.week.map((d, i) => `<div class="col ${i === 6 ? 'today' : ''} ${d.sec > 0 ? 'has' : ''}"><b>${d.sec > 0 ? fmtMin(d.sec) : ''}</b><i style="height:${Math.max(3, Math.round(d.sec / max * 100))}%"></i><span>${'SMTWTFS'[d.dow]}</span></div>`).join('')}</div></div>
-    <div class="glass chart"><div class="k">Last 28 days</div>
-      <div class="heat">${s.heat.map((d, i) => `<i class="${lvl(d)} ${i === 27 ? 'now' : ''}" title="${d.k}: ${fmtMin(d.sec)}"></i>`).join('')}</div></div>
     <div class="section-t">History</div>
     <div class="glass card hist" style="padding:0 6px 8px">${hist || '<div class="empty">No sessions recorded yet.<br>Finish a focus session and it will appear here.</div>'}</div>
     ${sortedHist.length > histShown ? '<button class="btn-sm ghost" id="moreHist" style="align-self:center">Show more</button>' : ''}
-    <p class="fine">Focus time counts every minute actually focused, including interrupted sessions of at least 1 minute. XP, completion rate and streaks follow the rules in Settings.</p>`;
+    <p class="fine">Focus time counts every minute actually focused, including interrupted sessions of at least 1 minute. XP, completion rate and streaks follow the rules in Settings. Discipline points only grow — Zyn never loses an evolution.</p>`;
   if (html !== lastStats) {
     lastStats = html;
     const el = $('statsView'), top = el.scrollTop;
     el.innerHTML = html; el.scrollTop = top;
+    $('zynStat').innerHTML = zynSvg || (zynSvg = wolfSVG());
   }
 }
+const dow0 = k => new Date(k + 'T12:00').getDay();
+// tap a bar / cell / chip for its exact value
+let tipT;
+function showTip(el) {
+  const t = $('tip'), r = el.getBoundingClientRect();
+  t.textContent = el.dataset.tip; t.classList.add('show');
+  const w = t.offsetWidth, x = Math.min(innerWidth - w - 8, Math.max(8, r.left + r.width / 2 - w / 2));
+  t.style.left = x + 'px'; t.style.top = Math.max(8, r.top - t.offsetHeight - 8) + 'px';
+  clearTimeout(tipT); tipT = setTimeout(() => t.classList.remove('show'), 2400);
+}
+$('statsView').addEventListener('click', e => { const el = e.target.closest('[data-tip]'); if (el) showTip(el); });
+$('statsView').addEventListener('scroll', () => $('tip').classList.remove('show'), { passive: true });
 $('statsView').onclick = e => { if (e.target.id === 'moreHist') { histShown += 30; lastStats = ''; renderStats(); } };
 
 /* ---------- settings ---------- */
-const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', notify: 's-notify', black: 's-black', calm: 's-calm', wolf: 's-wolf' };
+const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', alarm: 's-alarm', notify: 's-notify', black: 's-black', calm: 's-calm', wolf: 's-wolf' };
 function notifyNote() {
   if (!('Notification' in window)) return 'Not supported in this browser.';
   const p = Notification.permission;
-  return (p === 'denied' ? 'Blocked in your browser settings. ' : '') + 'Only shown while the app is running — web apps cannot wake a locked iPhone.';
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent), standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (p === 'denied') return 'Blocked. Turn on in iPhone Settings → Notifications → Zyntry.';
+  if (ios && !standalone) return 'On iPhone, add Zyntry to your Home Screen first (Share → Add to Home Screen), then turn this on.';
+  return 'Banner at the top of the screen when a session or break ends. Tip: iPhone Settings → Notifications → Zyntry → Banner Style: Persistent keeps it on screen.';
 }
 function renderSettings() {
   const s = settings();
@@ -433,6 +560,13 @@ $('s-notify').addEventListener('change', async e => {
   } else applySettings({ notify: false });
 });
 let vt; $('s-volume').addEventListener('input', e => { store.setSettings({ volume: +e.target.value }); clearTimeout(vt); vt = setTimeout(() => { audio.unlock(); audio.play('tap'); }, 90); });
+$('testNotify').onclick = async () => {
+  if (!('Notification' in window)) return toast('Notifications are not supported here');
+  let p = Notification.permission;
+  try { if (p === 'default') p = await Notification.requestPermission(); } catch (e) {}
+  if (p !== 'granted') return toast('Allow notifications first');
+  notify('🐺 Zyntry', 'Notifications work! You will see this when a session ends.', true); audio.unlock(); audio.play('breakDone');
+};
 $('s-ambient').addEventListener('change', e => { audio.unlock(); applySettings({ ambient: e.target.value }); });
 $('s-ambVol').addEventListener('input', e => { store.setSettings({ ambVol: +e.target.value }); syncAmbient(); });
 $('swatches').onclick = e => { const b = e.target.closest('.sw'); if (b) applySettings({ accent: b.dataset.a }); };
@@ -527,7 +661,12 @@ if (settings().notify && (!('Notification' in window) || Notification.permission
 if (timer.completed >= settings().rounds) timer = { ...timer, completed: 0 };
 renderAll();
 booted = true;
-setTimeout(() => wolf.say(timer.running ? wolf.line(timer.mode === 'focus' ? 'focus' : 'rest') : (new Date().getHours() < 12 ? 'Good morning! ' : new Date().getHours() < 18 ? 'Hey there! ' : 'Evening hunt? ') + wolf.line('idle')), 700);
+setTimeout(() => {
+  const v = discipline(store.history, Date.now()).vitality, h = new Date().getHours();
+  wolf.say(timer.running ? wolf.line(timer.mode === 'focus' ? 'focus' : 'rest')
+    : v === 'tired' || v === 'lonely' ? wolf.line(v)
+    : (h < 12 ? 'Good morning! ' : h < 18 ? 'Hey there! ' : 'Evening hunt? ') + wolf.line('idle'));
+}, 700);
 setInterval(tick, 250);
 if (timer.running) { lockScreen(); tick(); }
 if (store.warnings.length) setTimeout(() => toast('Some saved data could not be read. A copy was kept on this device.', 5000), 600);

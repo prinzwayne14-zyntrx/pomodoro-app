@@ -128,6 +128,23 @@ await test('daily goal reached: wolf howls', async () => {
   ok((await p.textContent('#goalTxt')).includes('1 / 1'), 'goal text'); await p.close();
 });
 
+await test('Zyn evolves from discipline and the evolution is celebrated once', async () => {
+  const D = 864e5, n = now(), h = [];
+  for (let d = 1; d <= 3; d++) for (let k = 0; k < 4; k++) h.push({ id: `e${d}-${k}`, t: n - d * D - k * 6e4, m: 'focus', s: 1500, c: 1, x: 35 });  // 3 + 6 + 6 = 15 pts -> Scout
+  const p = await fresh(ctx, { 'sl.history': h });
+  eq(await p.getAttribute('#wolf', 'data-stage'), '2'); eq(await p.textContent('#stageName'), 'Scout');
+  ok(!(await p.evaluate(() => document.getElementById('lvl').classList.contains('show'))), 'no celebration on first load');
+  await p.evaluate(() => localStorage.setItem('sl.evo', '1')); await p.reload(); await p.waitForSelector('#clock');
+  await set(p, 'sl.timer', T({ running: true, endAt: now() + 800, sid: 'evo-trigger' }));
+  await p.evaluate(() => localStorage.setItem('sl.evo', '1')); await p.reload(); await p.waitForSelector('#clock');
+  await p.waitForSelector('#lvl.show', { timeout: 6000 }); ok(['ZYN EVOLVED', 'LEVEL UP', 'RANK UP'].includes(await p.textContent('#lvlT')), 'celebration');
+  await p.close();
+});
+await test('wolf mood follows the routine: lonely after a week away', async () => {
+  const p = await fresh(ctx, { 'sl.history': [{ id: 'old', t: now() - 8 * 864e5, m: 'focus', s: 1500, c: 1, x: 35 }] });
+  eq(await p.getAttribute('#wolf', 'data-mood'), 'lonely'); await p.close();
+});
+
 /* ---------- tasks ---------- */
 await test('tasks: create, prioritise, edit, complete, assign to a session, delete', async () => {
   const p = await fresh(ctx); await goto(p, 'tasksView');
@@ -156,10 +173,14 @@ await test('statistics are computed from recorded sessions', async () => {
   h.push({ id: 'cut', t: n - 5000, m: 'focus', s: 600, c: 0, x: 0 });
   const p = await fresh(ctx, { 'sl.history': h }); await goto(p, 'statsView'); await p.waitForTimeout(300);
   const txt = (await p.textContent('#statsView')).replace(/\s+/g, ' ');
-  ok(txt.includes('Today35m'), 'today 35m: ' + txt.slice(0, 120));
+  ok(txt.includes('Focus today 35m'), 'today 35m: ' + txt.slice(0, 120)); ok(txt.includes('1/ 6goal'), 'goal ring');
   ok(txt.includes('This week1h 25m') || txt.includes('This week1h 35m') || /This week\d+h/.test(txt), 'week');
   ok(txt.includes('Sessions done3'), 'sessions'); ok(txt.includes('Completion75%'), 'completion'); ok(txt.includes('Day streak3days'), 'streak'); ok(txt.includes('Total XP105'), 'xp');
-  eq(await p.locator('.hrow').count(), 4); eq(await p.locator('.heat i').count(), 28); eq(await p.locator('.col').count(), 7); await p.close();
+  eq(await p.locator('.hrow').count(), 4); const hc = await p.locator('.heat i').count(); ok(hc >= 78 && hc <= 84, 'heat cells ' + hc); eq(await p.locator('.col').count(), 7);
+  eq(await p.locator('.d14 i').count(), 14); eq(await p.locator('.dp').count(), 4); ok(txt.includes('Discipline · 14 days'), 'discipline card');
+  ok(txt.includes('Zyn · Evolution') && txt.includes('Scout'), 'evolution card');                    // 3 active days + 3 streak days*2 = 9 -> still Pup, next Scout
+  ok(txt.includes('Novice') && txt.includes('XP to Rank D'), 'rank card');
+  await p.locator('.col').nth(6).click(); await p.waitForSelector('#tip.show'); ok((await p.textContent('#tip')).includes('35m'), 'tap tooltip'); await p.close();
 });
 await test('empty state shows zeros, no NaN/undefined', async () => {
   const p = await fresh(ctx); await goto(p, 'statsView'); const t = await p.textContent('#statsView'); ok(!/NaN|undefined|Infinity/.test(t), t.slice(0, 200)); await p.close();
@@ -252,16 +273,17 @@ await test('manifest + icons are valid for installation', async () => {
 await test('service-worker update: new version is picked up automatically, user data untouched', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sl-upd-')); fs.cpSync(ROOT, tmp, { recursive: true, filter: s => !/node_modules|\.git|tests/.test(s) });
   const s2 = await serve(tmp, 8124); const c = await newCtx(); const p = await c.newPage();
+  try {
   await p.goto('http://127.0.0.1:8124/index.html'); await p.evaluate(() => localStorage.clear()); await p.reload();
   await p.waitForFunction(() => navigator.serviceWorker.controller, null, { timeout: 15000 });
   await p.evaluate(() => { localStorage.setItem('sl.history', JSON.stringify([{ id: 'u1', t: Date.now() - 1e5, m: 'focus', s: 1500, c: 1, x: 35 }])); window.__marker = 1; });
-  fs.writeFileSync(path.join(tmp, 'sw.js'), fs.readFileSync(path.join(tmp, 'sw.js'), 'utf8').replace("VERSION = '4.0.0'", "VERSION = '4.0.1-test'"));
+  fs.writeFileSync(path.join(tmp, 'sw.js'), fs.readFileSync(path.join(tmp, 'sw.js'), 'utf8').replace("VERSION = '5.0.0'", "VERSION = '5.0.1-test'"));
   await p.evaluate(() => navigator.serviceWorker.getRegistration().then(r => r.update()));
   await p.waitForFunction(() => !window.__marker, null, { timeout: 15000 });             // page reloaded itself
   await p.waitForSelector('#clock');
-  const keys = await p.evaluate(() => caches.keys()); eq(keys.sort(), ['zyntry-4.0.1-test']); // old cache removed
+  const keys = await p.evaluate(() => caches.keys()); eq(keys.sort(), ['zyntry-5.0.1-test']); // old cache removed
   eq((await get(p, 'sl.history')).length, 1, 'data must survive an update'); eq(await p.textContent('#xpNum'), '35 / 100 XP');
-  await c.close(); s2.kill();
+  } finally { await c.close(); s2.kill(); }
 });
 
 await browser.close(); srv.kill();

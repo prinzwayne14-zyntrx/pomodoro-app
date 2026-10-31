@@ -5,7 +5,12 @@ Plain HTML/CSS/JS (ES modules): **no build step, no dependencies, no accounts, n
 
 ## Features
 
-- **Zyn the wolf** — animated SVG companion in the timer dial. Focused brows while you work, looks around when paused, sleeps (Zzz) on breaks, bounces when you finish, howls on level-up and daily goal. Tap for encouragement. Gains gear as you rank up: scarf (D/C), star mark (B/A), crown (S). Can be hidden in Settings.
+- **Zyn the wolf** — animated companion in the timer dial. Focused brows while you work, looks around when paused, sleeps on breaks, bounces when you finish, howls on level-up. Tap for encouragement.
+- **Zyn evolves with your discipline** — Pup → Scout → Hunter → Alpha → Spirit Wolf, earned from routine, not raw hours: +1 point per active day, +2 per strong day (4+ XP sessions), +2 per day of your best streak. Points never go down. His mood follows your recent routine (energetic / sleepy after 2–3 days off / misses you after 4+).
+- **Ranks with titles** — E Novice, D Apprentice, C Adept, B Expert, A Master, S Legend; each with its own colour and emblem, a rank-up celebration and progress to the next rank.
+- **Statistics** — daily goal ring, evolution card, rank card, 14-day discipline score, 7-day chart with average line, best time of day to focus, 12-week calendar heatmap, totals and history. Tap any bar or cell for its value.
+- **Sound** — louder, richer generated sounds (compressor + reverb), repeating end alarm (stops when you touch the screen), wolf howl on rank-up and evolution.
+- **Notifications** — banner at the top of the screen when a session or break ends, with a "Send test" button. On iPhone the app must be on the Home Screen (iOS 16.4+).
 - **Daily goal** — set a number of focus sessions per day; progress under the timer and in Stats ("goal days" over the last 7 days).
 - **Focus sounds** — rain, brown noise, ocean waves, white noise. Generated on-device (no files, works offline), play only while a focus session runs. Quick toggle next to the task chip.
 - **Streak** in the header, **quick add** a task right from the timer's task picker.
@@ -62,6 +67,6 @@ Push to `main`. Bump `VERSION` in `sw.js` **and** `APP_VERSION` in `js/app.js` (
 ## Known limits
 
 - iOS suspends web apps when the screen locks or the app is closed: the timer is still correct when you return, but sounds and notifications cannot fire while suspended. Keep the app open during a session (it keeps the screen awake).
-- Notifications only appear while the app is running. True background alerts need a push server, which would not be free or offline.
+- Notifications appear while the app is open or was just sent to the background. A banner on a locked iPhone would need a push server, which this app deliberately does not use (no accounts, no servers). Tip: iPhone Settings → Notifications → Zyntry → Banner Style: Persistent.
 - Data lives in the browser's local storage on one device. Use Export backup to move or protect it. (Data and backups from the app's previous name, Solo Leveling, carry over automatically.) Clearing Safari website data deletes it.
 - The clock is the device clock; changing it can bend stats and XP (unavoidable for an offline app).
