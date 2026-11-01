@@ -1,17 +1,24 @@
 {
-  "name": "Zyntry",
-  "short_name": "Zyntry",
-  "description": "Focus timer with a wolf companion, tasks, daily goals, focus sounds and stats.",
+  "id": "./",
+  "name": "ZENTRY",
+  "short_name": "ZENTRY",
+  "description": "Focus timer, habit and activity tracker with a wolf companion and a private AI assistant. Works offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#06070c",
-  "theme_color": "#06070c",
+  "background_color": "#07080f",
+  "theme_color": "#07080f",
+  "categories": ["productivity", "health", "lifestyle"],
   "icons": [
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Start focus", "url": "./?view=timerView", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Talk to Zyn", "url": "./?view=chatView", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

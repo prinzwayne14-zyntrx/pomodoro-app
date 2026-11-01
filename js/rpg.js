@@ -69,14 +69,19 @@ export function stats(history, tasks, now = Date.now(), liveSec = 0) {
   if (!set.has(cur)) cur--;
   while (set.has(cur)) { streak++; cur--; }
 
-  const weekSec = week.reduce((a, d) => a + d.sec, 0);
+  const last7Sec = week.reduce((a, d) => a + d.sec, 0);
+  // calendar week: Monday .. today (see analytics.js for all range definitions)
+  const tn = dayNum(tk), mon = tn - ((dow(tk) + 6) % 7);
+  let weekSec = liveSec, doneSec = 0;
+  for (const [k, d] of days) { const n = dayNum(k); if (n >= mon && n <= tn) weekSec += d.sec; }
+  for (const h of history) if (h.m === 'focus' && h.c) doneSec += h.s;
   let bestDay = liveSec ? today.sec + liveSec : 0;
   for (const d of days.values()) if (d.sec > bestDay) bestDay = d.sec;
 
   const tdone = tasks.filter(t => t.done && t.doneAt);
   return {
     todaySec: today.sec + liveSec, todayN: today.n, todayXp: today.xp,
-    weekSec, monthSec, avg7: weekSec / 7,
+    weekSec, last7Sec, monthSec, avg7: last7Sec / 7, avgSession: done ? doneSec / done : 0,
     totalSec: totalSec + liveSec, totalXp, done, cut,
     rate: done + cut ? Math.round(100 * done / (done + cut)) : null,
     streak, best, bestDay, week, heat,

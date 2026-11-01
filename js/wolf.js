@@ -1,7 +1,7 @@
-// Zyntry's wolf companion: an inline SVG character animated with CSS.
+// Zyn, ZENTRY's wolf companion: an inline SVG character animated with CSS.
 // The look is driven by data attributes on the root element:
-//   data-state = idle | focus | paused | rest | happy | howl
-//   data-tier  = 0..3 (rank based gear: scarf, star mark, crown)
+//   data-state = idle | focus | working | paused | rest | proud | serious | happy | howl
+//   data-stage = 1..5 (evolution from discipline), data-mood = new | strong | tired | lonely
 
 export function wolfSVG() {
   return `<svg class="wolf-svg" viewBox="-6 -8 132 126" aria-hidden="true">
@@ -34,6 +34,7 @@ export function wolfSVG() {
     <g class="w-crown"><path d="M47 14 L 50 3 L 55 9 L 60 0 L 65 9 L 70 3 L 73 14 Z"/><circle cx="60" cy="9.5" r="1.6"/></g>
     <ellipse class="w-blush" cx="40" cy="51" rx="5" ry="2.6"/><ellipse class="w-blush" cx="80" cy="51" rx="5" ry="2.6"/>
     <g class="w-brows"><path d="M41 31 L 52 34"/><path d="M79 31 L 68 34"/></g>
+    <g class="w-brows2"><path d="M41.5 32.5 L 52 32.5"/><path d="M78.5 32.5 L 68 32.5"/></g>
     <g class="w-eyes">
       <g class="w-eye"><ellipse class="w-iris" cx="47" cy="40" rx="4.6" ry="5.2"/><circle class="w-pupil" cx="47.4" cy="40.6" r="2.7"/><circle class="w-glint" cx="45.6" cy="38.4" r="1.3"/></g>
       <g class="w-eye"><ellipse class="w-iris" cx="73" cy="40" rx="4.6" ry="5.2"/><circle class="w-pupil" cx="72.6" cy="40.6" r="2.7"/><circle class="w-glint" cx="71.2" cy="38.4" r="1.3"/></g>
@@ -45,11 +46,13 @@ export function wolfSVG() {
     <path class="w-glint2" d="M57 48.6 Q 59 47.8 61 48.3"/>
     <g class="w-mouth"><path d="M60 55 v3.2"/><path d="M60 58.2 Q 56 61.5 52.5 58.6"/><path d="M60 58.2 Q 64 61.5 67.5 58.6"/></g>
     <path class="w-frown" d="M54 61 Q 60 57.5 66 61"/>
+    <path class="w-flat" d="M55 59.6 L 65 59.6"/>
     <path class="w-tongue" d="M56.6 59.6 Q 60 61 63.4 59.6 Q 63.6 65.5 60 65.8 Q 56.4 65.5 56.6 59.6 Z"/>
     <ellipse class="w-howl" cx="60" cy="60" rx="3.6" ry="4.4"/>
   </g>
   </g>
   <g class="w-sparks"><circle cx="14" cy="60" r="1.6"/><circle cx="106" cy="40" r="1.3"/><circle cx="22" cy="20" r="1.1"/><circle cx="100" cy="92" r="1.5"/><circle cx="8" cy="96" r="1.2"/></g>
+  <g class="w-shine"><path d="M18 30 l1.6 4 4 1.6 -4 1.6 -1.6 4 -1.6-4 -4-1.6 4-1.6z"/><path d="M100 22 l1.3 3.2 3.2 1.3 -3.2 1.3 -1.3 3.2 -1.3-3.2 -3.2-1.3 3.2-1.3z"/><path d="M106 60 l1 2.5 2.5 1 -2.5 1 -1 2.5 -1-2.5 -2.5-1 2.5-1z"/></g>
   <g class="w-zzz"><text x="92" y="22">z</text><text x="100" y="12">z</text><text x="107" y="4">z</text></g>
 </svg>`;
 }
@@ -57,6 +60,9 @@ export function wolfSVG() {
 const LINES = {
   idle: ['Ready when you are.', 'One focused block. That’s all.', 'Pick a task and let’s hunt.', 'Small steps, every day.', 'Tap Start — I’ll keep watch.'],
   focus: ['Hunt mode. Phone down.', 'Deep focus. I’ve got your back.', 'Stay on the trail.', 'One thing at a time.', 'Quiet mind, sharp claws.'],
+  working: ['Halfway there. Keep pushing.', 'You’re in the zone.', 'Strong focus. Stay with it.'],
+  proud: ['Daily goal done. Proud of you.', 'Goal reached — that’s discipline.', 'We did it today. Awoo!'],
+  serious: ['Yesterday slipped. Today we hunt.', 'One session gets us back on track.', 'No guilt — just the next session.'],
   paused: ['Taking a breather?', 'I’ll wait right here.', 'Back on the trail soon?'],
   rest: ['Rest, stretch, drink water.', 'Eyes off the screen for a bit.', 'Good wolves rest too.'],
   done: ['Great hunt!', 'That’s how the pack does it.', 'Another one down. Proud of you.'],

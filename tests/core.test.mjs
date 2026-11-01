@@ -126,15 +126,15 @@ test('backup export/import round trip, merge without duplicates, replace keeps a
 
   const bm = mem(); const b = createStore(bm);
   b.addSession({ id: 's1', t: NOW, m: 'focus', s: 1500, c: 1, x: 35 });          // already has s1
-  assert.deepEqual(b.importData(p, 'merge'), { sessions: 1, tasks: 1 });
-  assert.deepEqual(b.importData(p, 'merge'), { sessions: 0, tasks: 0 });          // idempotent
+  assert.deepEqual(b.importData(p, 'merge'), { sessions: 1, tasks: 1, activities: 0 });
+  assert.deepEqual(b.importData(p, 'merge'), { sessions: 0, tasks: 0, activities: 0 });          // idempotent
   assert.equal(b.history.length, 2); assert.equal(b.totalXp(), 70);
 
   b.addSession({ id: 'extra', t: NOW, m: 'focus', s: 1500, c: 1, x: 35 });
   b.importData(p, 'replace');
   assert.equal(b.history.length, 2);
   assert.ok(JSON.parse(bm.getItem('sl.prerestore')).history.some(h => h.id === 'extra'));   // nothing silently lost
-  assert.equal(json.app, 'zyntry');
+  assert.equal(json.app, 'zentry');
   assert.equal(parseBackup({ ...json, app: 'solo-leveling' }).sessions.length, 2);   // backups from the old app name still import
   assert.throws(() => parseBackup({ app: 'other' }));
   assert.throws(() => parseBackup({ app: 'solo-leveling', version: 99, history: [], tasks: [] }));

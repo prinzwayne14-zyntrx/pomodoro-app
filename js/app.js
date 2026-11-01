@@ -3,9 +3,17 @@ import { createStore, parseBackup } from './store.js';
 import * as TM from './timer.js';
 import { createAudio } from './audio.js';
 import { createWolf, wolfSVG } from './wolf.js';
+import { createVoice, createListener } from './voice.js';
+import { createAssistant } from './ai/assistant.js';
+import { rulesEngine, createWebLLMEngine, createServerEngine, WEBLLM_MODELS, isPrivateUrl } from './ai/engines.js';
+import { initChat } from './ui/chat.js';
+import { initTrack, activityStatsHTML } from './ui/track.js';
+import { fmtQty, labelOf } from './catalog.js';
+import { goalProgress } from './analytics.js';
+import { BACKGROUNDS } from './store.js';
 
-const APP_VERSION = '5.0.0';
-const APP_NAME = 'Zyntry';
+const APP_VERSION = '6.0.0';
+const APP_NAME = 'ZENTRY';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -24,20 +32,25 @@ let timer = store.timer;
 const setTimer = t => { timer = t; store.saveTimer(t); };
 const audio = createAudio(settings);
 const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
+const voice = createVoice(settings);
+const listener = createListener();
 
 /* ---------- small UI helpers ---------- */
 let toastT;
-function toast(msg, ms = 2600) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+function toast(msg, ms = 2600, act = null) {
+  const t = $('toast'); t.textContent = msg;
+  if (act) { const b = document.createElement('button'); b.type = 'button'; b.textContent = act.label; b.onclick = () => { t.classList.remove('show'); act.fn(); }; t.appendChild(b); }
+  t.classList.add('show');
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms);
 }
 let dlgResolve = null, dlgButtons = [];
-function dialog({ title, text = '', body = '', buttons = [{ label: 'OK', value: true, primary: true }] }) {
+function dialog({ title, text = '', body = '', buttons = [{ label: 'OK', value: true, primary: true }], onOpen = null }) {
   return new Promise(res => {
     if (dlgResolve) closeDlg(null);
     dlgResolve = res; dlgButtons = buttons;
     $('dlgBox').innerHTML = `<h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ''}${body}<div class="dlgbtns">${buttons.map((b, i) => `<button class="btn-sm ${b.cls || ''}" data-i="${i}">${esc(b.label)}</button>`).join('')}</div>`;
     $('dlg').classList.add('open');
+    if (onOpen) onOpen();
     const f = $('dlgBox').querySelector('input[type=text]'); if (f) setTimeout(() => f.focus(), 60);
   });
 }
@@ -50,7 +63,7 @@ $('dlg').addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   if ($('dlg').classList.contains('open')) {
     if (e.key === 'Escape') closeDlg(null);
-    else if (e.key === 'Enter' && e.target.matches('input[type=text]')) { e.preventDefault(); const p = dlgButtons.find(b => b.primary); if (p) closeDlg(p.value); }
+    else if (e.key === 'Enter' && e.target.matches('#dlgBox input')) { e.preventDefault(); const p = dlgButtons.find(b => b.primary); if (p) closeDlg(p.value); }
     return;
   }
   if (e.code === 'Space' && e.target === document.body && view === 'timerView') { e.preventDefault(); toggle(); }
@@ -65,10 +78,13 @@ const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
 /* ---------- theme ---------- */
+const BG_COLOR = { aurora: '#07080f', amoled: '#000000', charcoal: '#131417', midnight: '#0d1838', purple: '#150a27', gradient: '#111b3c', wolf: '#0c1232', mountains: '#141a3a', forest: '#06201b', light: '#f3f4f8' };
+const BG_NAMES = { aurora: 'Aurora', amoled: 'AMOLED', charcoal: 'Charcoal', midnight: 'Midnight', purple: 'Purple', gradient: 'Dusk', wolf: 'Wolf moon', mountains: 'Mountains', forest: 'Forest', light: 'Light' };
 function applyTheme() {
   const s = settings(), b = document.body;
-  b.dataset.accent = s.accent; b.dataset.black = s.black ? '1' : '0'; b.dataset.calm = s.calm ? '1' : '0'; b.dataset.wolf = s.wolf ? '1' : '0';
-  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = s.black ? '#000000' : '#06070c';
+  b.dataset.accent = s.accent; b.dataset.calm = s.calm ? '1' : '0'; b.dataset.wolf = s.wolf ? '1' : '0';
+  b.dataset.bg = s.bg; b.dataset.theme = s.bg === 'light' ? 'light' : 'dark'; $('backdrop').dataset.bg = s.bg;
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = BG_COLOR[s.bg] || '#07080f';
 }
 
 /* ---------- timer view ---------- */
@@ -109,7 +125,8 @@ function renderTimer() {
   $('player').dataset.rank = li.rank; $('rankName').textContent = 'Rank ' + li.rank + ' · ' + RANKS.find(r => r.r === li.rank).title;
   $('stageName').textContent = dz.stage.name;
   checkEvolution(dz);
-  wolf.set(timer.running ? (timer.mode === 'focus' ? 'focus' : 'rest') : TM.inProgress(timer) ? 'paused' : 'idle', { talk: booted });
+  wolf.set(wolfBase(), { talk: booted });
+  $('chatWolf').dataset.stage = String(dz.stage.n); $('chatWolf').dataset.mood = dz.vitality;
   const td = todayInfo();
   $('goalTxt').innerHTML = `<b>${td.n}</b> / ${settings().goal} today`; $('goalTxt').classList.toggle('met', td.n >= settings().goal);
   $('streakN').textContent = td.streak; $('streakChip').classList.toggle('hot', td.streak > 0);
@@ -123,12 +140,25 @@ function renderTimer() {
 const wolf = createWolf($('wolf'), $('bubble'));
 $('lvlWolf').innerHTML = wolfSVG();
 let booted = false;
+// Zyn's mood follows what is actually happening (never random):
+// focus (first half) → working (second half) · paused · rest (break running) · proud (today's goal met) · serious (yesterday's goal missed) · idle
+function wolfBase() {
+  if (timer.running) return timer.mode !== 'focus' ? 'rest' : TM.elapsed(timer, Date.now()) >= timer.total / 2 ? 'working' : 'focus';
+  if (TM.inProgress(timer)) return 'paused';
+  const g = settings().goal, today = dkey(Date.now()), yday = agoKey(1);
+  let t = 0, y = 0, any = false;
+  for (const h of store.history) if (h.m === 'focus' && h.c) { any = true; const k = dkey(h.t); if (k === today) t++; else if (k === yday) y++; }
+  if (t >= g) return 'proud';
+  if (any && y < g && t === 0) return 'serious';
+  return 'idle';
+}
+let lastBase = '';
 function todayInfo() {
   const s = stats(store.history, store.tasks, Date.now());
   return { n: s.todayN, streak: s.streak };
 }
 $('stageChip').onclick = () => { audio.unlock(); audio.play('tap'); go('statsView'); };
-$('wolf').onclick = () => { audio.unlock(); audio.play('tap'); buzz(15); wolf.react('happy', 1800, wolf.line('tap')); };
+$('wolf').onclick = () => { audio.unlock(); audio.play('tap'); buzz(15); const l = wolf.line('tap'); wolf.react('happy', 1800, l); voice.speak(l); };
 const AMB_NAMES = { off: 'Off', rain: 'Rain', brown: 'Brown noise', waves: 'Waves', white: 'White noise' };
 const AMB_ORDER = ['off', 'rain', 'brown', 'waves', 'white'];
 function syncAmbient() {
@@ -153,7 +183,7 @@ function unlockScreen() { try { wake && wake.release(); } catch (e) {} wake = nu
 function notify(title, body, force = false) {
   if ((!settings().notify && !force) || !('Notification' in window) || Notification.permission !== 'granted') return;
   try {
-    const opts = { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'zyntry', renotify: true, silent: false, vibrate: [200, 100, 200], data: { url: location.href } };
+    const opts = { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'zentry', renotify: true, silent: false, vibrate: [200, 100, 200], data: { url: location.href } };
     (navigator.serviceWorker ? navigator.serviceWorker.getRegistration() : Promise.resolve(null))
       .then(r => r ? r.showNotification(title, opts) : new Notification(title, opts)).catch(() => {});
   } catch (e) {}
@@ -174,8 +204,10 @@ let countSec = null, warned = null, reloadPending = false;
 function toggle() { timer.running ? pause() : start(); }
 function start() {
   audio.unlock(); audio.play('start');
+  const fresh = !TM.inProgress(timer);
   setTimer(TM.start(timer, Date.now())); countSec = null;
   lockScreen(); renderTimer();
+  if (fresh) voice.speak(timer.mode === 'focus' ? 'Your focus session is starting. Let’s get focused.' : timer.mode === 'long' ? 'Long break. You earned it.' : 'Time for a short break.');
 }
 function pause() {
   audio.play('pause'); setTimer(TM.pause(timer, Date.now())); unlockScreen(); renderTimer();
@@ -232,13 +264,14 @@ function finish(n) {
   if (t.mode === 'focus') {
     if (fresh) { alarm('focusDone'); buzz([200, 100, 200, 100, 300]); }
     const g = settings().goal, goalNow = todayInfo().n;
-    if (added && goalBefore < g && goalNow >= g) { wolf.react('howl', 3600, wolf.line('goal')); setTimeout(() => toast(`Daily goal reached · ${goalNow}/${g} 🎯`, 3600), 3700); }
-    else if (added) wolf.react('happy', 3200, wolf.line('done') + (entry.x ? ` +${entry.x} XP` : ''));
+    if (added && goalBefore < g && goalNow >= g) { wolf.react('howl', 3600, wolf.line('goal')); voice.speak('You reached your daily goal. Excellent work.', { priority: true }); setTimeout(() => toast(`Daily goal reached · ${goalNow}/${g} 🎯`, 3600), 3700); }
+    else if (added) { wolf.react('happy', 3200, wolf.line('done') + (entry.x ? ` +${entry.x} XP` : '')); if (fresh) voice.speak(`Excellent work. You completed another session. ${nx.mode === 'long' ? 'Take a long break.' : 'Time for a short break.'}`, { priority: true }); }
     if (added) toast(entry.x ? `Session complete · +${entry.x} XP` : 'Session complete · no XP (under 10 min)', 3600);
     notify('🐺 Focus complete!', (entry && entry.x ? `+${entry.x} XP. ` : '') + (nx.mode === 'long' ? `Long break: ${settings().long} min. You earned it.` : `Take a ${settings().short}-min break.`) + (t.task && store.taskTitle(t.task) ? ` · ${store.taskTitle(t.task)}` : ''));
   } else {
     if (fresh) { alarm('breakDone'); buzz([200, 100, 200]); }
     toast('Break over — ready to focus', 3000); wolf.react('happy', 2200, 'Break’s over. Back on the hunt?');
+    if (fresh) voice.speak('Break is over. Let’s get focused.', { priority: true });
     notify('⏰ Break is over', `Zyn is ready. Next: ${settings().focus}-min focus.`);
   }
   if (!fresh) toast('Your session finished while you were away', 4000);
@@ -252,6 +285,7 @@ function celebrate(c) {
   $('lvlT').textContent = c.kicker; $('lvlN').textContent = c.big; $('lvlS').textContent = c.sub;
   $('lvl').dataset.kind = c.kind; $('lvl').classList.add('show');
   wolf.react('howl', 3200); audio.play(c.sound); buzz([60, 40, 60, 40, 200]);
+  setTimeout(() => voice.speak(c.kind === 'evolve' ? `I evolved. I'm now a ${c.big}.` : c.kind === 'rank' ? `Rank up. You are now rank ${c.big}.` : `Level up. You reached level ${c.big}.`), 1400);
   clearTimeout(celebrate.t); celebrate.t = setTimeout(closeCelebrate, c.ms || 3400);
 }
 function closeCelebrate() { $('lvl').classList.remove('show'); const n = celebrateQ.shift(); if (n) setTimeout(() => celebrate(n), 250); }
@@ -281,6 +315,7 @@ function tick() {
       warned = timer.sid; toast('1 minute left'); audio.play('warn'); notify('⏳ 1 minute left', 'Finish strong.');
     }
     renderClock();
+    const b = wolfBase(); if (b !== lastBase) { lastBase = b; wolf.set(b, { talk: true }); }
   } else if (reloadPending && !$('dlg').classList.contains('open')) { location.reload(); return; }
   if (view === 'statsView') renderStats();
 }
@@ -295,10 +330,11 @@ let view = 'timerView';
 function go(v) {
   view = v;
   document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === v));
-  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.view === v));
+  document.querySelectorAll('[data-view]').forEach(x => x.classList.toggle('active', x.dataset.view === v));
   if (v === 'tasksView') renderTasks(); if (v === 'statsView') { lastStats = ''; renderStats(); } if (v === 'settingsView') renderSettings();
+  if (v === 'trackView') track.render(); if (v === 'chatView') { chat.render(); aiStatus(); setTimeout(() => matchMedia('(min-width: 720px)').matches && $('chatInput').focus(), 50); }
 }
-$('nav').onclick = e => { const b = e.target.closest('button'); if (!b || b.dataset.view === view) return; audio.unlock(); audio.play('tap'); go(b.dataset.view); };
+document.addEventListener('click', e => { const b = e.target.closest('nav button[data-view], #settingsBtn'); if (!b || b.dataset.view === view) return; audio.unlock(); audio.play('tap'); go(b.dataset.view); });
 
 /* ---------- tasks ---------- */
 let filter = 'today';
@@ -396,10 +432,16 @@ const ICON = {
 };
 const ic = k => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
 let zynSvg = null;
+let statsTab = 'focus';
 function renderStats() {
+  if (statsTab === 'activity') {
+    const html = `<h1 class="vtitle">Statistics</h1>${statsTabs()}${activityStatsHTML(store, esc)}`;
+    if (html !== lastStats) { lastStats = html; const el = $('statsView'), top = el.scrollTop; el.innerHTML = html; el.scrollTop = top; }
+    return;
+  }
   const now = Date.now(), live = liveSec(), s = stats(store.history, store.tasks, now, live), xp = store.totalXp(), li = levelInfo(xp), rk = rankInfo(xp);
   const dz = discipline(store.history, now), goal = settings().goal;
-  const card = (k, v, u, i) => `<div class="glass card"><div class="k">${i ? ic(i) : ''}${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ''}</div></div>`;
+  const card = (k, v, u, i, tip) => `<div class="card"><div class="k">${i ? ic(i) : ''}${k}${tip ? `<span class="info-i" data-tip="${esc(tip)}">i</span>` : ''}</div><div class="v">${v}${u ? `<small>${u}</small>` : ''}</div></div>`;
   if (sortedRev !== store.rev) { sortedRev = store.rev; sortedHist = store.history.filter(h => h.m === 'focus').sort((a, b) => b.t - a.t); }
   const tk = dkey(now), yk = agoKey(1);
   let hist = '', lastDay = '';
@@ -428,17 +470,17 @@ function renderStats() {
   const [vName, vText] = VITALITY[dz.vitality];
   const stagesRow = STAGES.map(st => `<span class="${st.n <= dz.stage.n ? 'got' : ''} ${st.n === dz.stage.n ? 'cur' : ''}" data-tip="${st.name}: ${st.min} pts · ${st.note}">${st.name.split(' ')[0]}</span>`).join('');
   const ladder = RANKS.map(r => `<span class="${RANKS.indexOf(r) <= RANKS.findIndex(x => x.r === rk.r) ? 'got' : ''} ${r.r === rk.r ? 'cur' : ''}" data-rank="${r.r}" data-tip="Rank ${r.r} · ${r.title} — from level ${r.min}">${r.r}</span>`).join('');
-  const html = `
-    <div class="glass hero2">
+  const html = `<h1 class="vtitle">Statistics</h1>${statsTabs()}
+    <div class="card hero2">
       <div class="gring ${gf >= 1 ? 'met' : ''}">${ring}<div class="gin"><b>${s.todayN}</b><small>/ ${goal}</small><span>goal</span></div></div>
       <div class="hstats">
         <div class="k">${live ? '<span class="live"></span>' : ''}Focus today</div>
         <div class="big">${fmtMin(s.todaySec)}</div>
-        <div class="mini"><span><b>+${s.todayXp}</b> XP</span><span><b>${s.todayN}</b> sessions</span><span><b>${s.tasksDoneToday}</b> tasks</span></div>
+        <div class="hmini"><span><b>+${s.todayXp}</b> XP</span><span><b>${s.todayN}</b> sessions</span><span><b>${s.tasksDoneToday}</b> tasks</span></div>
       </div>
     </div>
 
-    <div class="glass zyn">
+    <div class="card zyn">
       <div class="ztop">
         <div class="wolf mini" id="zynStat" data-state="idle" data-stage="${dz.stage.n}" data-mood="${dz.vitality}"></div>
         <div class="zinfo">
@@ -453,7 +495,7 @@ function renderStats() {
       <div class="earn"><span>+1 each active day</span><span>+2 strong day (${STRONG_DAY}+ sessions)</span><span>+2 per best-streak day</span></div>
     </div>
 
-    <div class="glass rankc" data-rank="${rk.r}">
+    <div class="card rankc" data-rank="${rk.r}">
       <div class="emblem"><span>${rk.r}</span></div>
       <div class="zinfo">
         <div class="k">Rank</div>
@@ -464,39 +506,40 @@ function renderStats() {
       <div class="ladder">${ladder}</div>
     </div>
 
-    <div class="glass chart disc">
+    <div class="card chart disc">
       <div class="chead"><div><div class="k">Discipline · 14 days</div><div class="big">${dz.score}<small>/100</small></div></div>
         <div class="cnote">Showed up <b>${dz.a14}</b> of 14 days<br><b>${dz.s14}</b> strong days</div></div>
       <div class="d14">${d14}</div>
       <div class="legend"><span><i></i>No focus</span><span><i class="act"></i>Active</span><span><i class="strong"></i>Strong (${STRONG_DAY}+)</span></div>
     </div>
 
-    <div class="glass chart">
+    <div class="card chart">
       <div class="chead"><div class="k">Last 7 days</div><div class="cnote">avg <b>${fmtMin(s.avg7)}</b>/day</div></div>
       <div class="bars">${s.avg7 > 0 ? `<div class="avgline" style="bottom:calc(${avgPct}% * .78 + 22px)"><span>avg</span></div>` : ''}${bars}</div>
     </div>
 
-    <div class="glass chart">
+    <div class="card chart">
       <div class="chead"><div class="k">Best time to focus</div></div>
       <div class="dps">${parts}</div>
       <div class="insight">${best >= 0 ? `You focus best in the <b>${DAYPARTS[best][0].toLowerCase()}</b>. Plan your hardest task then.` : 'Finish a few sessions to discover your best focus time.'}</div>
     </div>
 
-    <div class="glass chart">
+    <div class="card chart">
       <div class="chead"><div class="k">Last 12 weeks</div><div class="legend"><span>Less</span><i></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i><span>More</span></div></div>
       <div class="heat">${heat}</div>
     </div>
 
     <div class="grid">
-      ${card('This week', fmtMin(s.weekSec), '', 'cal')}${card('This month', fmtMin(s.monthSec), '', 'cal')}
-      ${card('Daily average', fmtMin(s.avg7), '7 days', 'avg')}${card('Best day', fmtMin(s.bestDay), '', 'trophy')}
-      ${card('Day streak', s.streak, s.streak === 1 ? 'day' : 'days', 'fire')}${card('Best streak', s.best, s.best === 1 ? 'day' : 'days', 'fire')}
-      ${card('Sessions done', s.done, '', 'check')}${card('Completion', s.rate == null ? '–' : s.rate, s.rate == null ? '' : '%', 'pct')}
-      ${card('Total focus', fmtMin(s.totalSec), '', 'clock')}${card('Total XP', s.totalXp.toLocaleString(), '', 'bolt')}
-      ${card('Goal days', goalDays(), 'last 7', 'trophy')}${card('Tasks done', s.tasksDoneToday, 'today · ' + s.tasksDoneTotal + ' total', 'task')}
+      ${card('This week', fmtMin(s.weekSec), '', 'cal', 'Focus time from Monday to today')}${card('This month', fmtMin(s.monthSec), '', 'cal', 'Focus time this calendar month')}
+      ${card('Daily average', fmtMin(s.avg7), 'last 7 days', 'avg', 'Focus time in the last 7 days (including today) divided by 7')}${card('Avg. session', fmtMin(s.avgSession), '', 'clock', 'Average length of a completed focus session')}
+      ${card('Day streak', s.streak, s.streak === 1 ? 'day' : 'days', 'fire', 'Consecutive days with at least one XP-earning focus session')}${card('Best streak', s.best, s.best === 1 ? 'day' : 'days', 'fire')}
+      ${card('Sessions done', s.done, '', 'check', 'Completed focus sessions, all time')}${card('Completion', s.rate == null ? '–' : s.rate, s.rate == null ? '' : '%', 'pct', 'Completed ÷ (completed + interrupted) focus sessions')}
+      ${card('Total focus', fmtMin(s.totalSec), '', 'clock', 'Every focused minute, including interrupted sessions of 1+ minute')}${card('Total XP', s.totalXp.toLocaleString(), '', 'bolt')}
+      ${card('Goal days', goalDays(), 'of last 7', 'trophy', 'Days in the last 7 on which the daily focus goal was met')}${card('Best day', fmtMin(s.bestDay), '', 'trophy', 'Most focus time in a single day')}
+      ${card('Tasks done', s.tasksDoneToday, 'today · ' + s.tasksDoneTotal + ' total', 'task')}${card('Consistency', dz.score, '/100', 'avg', '14-day score: 60% days you showed up, 40% strong days (4+ sessions)')}
     </div>
     <div class="section-t">History</div>
-    <div class="glass card hist" style="padding:0 6px 8px">${hist || '<div class="empty">No sessions recorded yet.<br>Finish a focus session and it will appear here.</div>'}</div>
+    <div class="card hist" style="padding:0 6px 8px">${hist || '<div class="empty">No sessions recorded yet.<br>Finish a focus session and it will appear here.</div>'}</div>
     ${sortedHist.length > histShown ? '<button class="btn-sm ghost" id="moreHist" style="align-self:center">Show more</button>' : ''}
     <p class="fine">Focus time counts every minute actually focused, including interrupted sessions of at least 1 minute. XP, completion rate and streaks follow the rules in Settings. Discipline points only grow — Zyn never loses an evolution.</p>`;
   if (html !== lastStats) {
@@ -507,6 +550,7 @@ function renderStats() {
   }
 }
 const dow0 = k => new Date(k + 'T12:00').getDay();
+const statsTabs = () => `<div class="seg" id="statsTabs" style="grid-template-columns:1fr 1fr"><button data-t="focus" class="${statsTab === 'focus' ? 'active' : ''}">Focus</button><button data-t="activity" class="${statsTab === 'activity' ? 'active' : ''}">Activity</button></div>`;
 // tap a bar / cell / chip for its exact value
 let tipT;
 function showTip(el) {
@@ -518,17 +562,20 @@ function showTip(el) {
 }
 $('statsView').addEventListener('click', e => { const el = e.target.closest('[data-tip]'); if (el) showTip(el); });
 $('statsView').addEventListener('scroll', () => $('tip').classList.remove('show'), { passive: true });
-$('statsView').onclick = e => { if (e.target.id === 'moreHist') { histShown += 30; lastStats = ''; renderStats(); } };
+$('statsView').onclick = e => {
+  if (e.target.id === 'moreHist') { histShown += 30; lastStats = ''; renderStats(); }
+  const t = e.target.closest('#statsTabs button'); if (t && t.dataset.t !== statsTab) { statsTab = t.dataset.t; lastStats = ''; $('statsView').scrollTop = 0; renderStats(); }
+};
 
 /* ---------- settings ---------- */
-const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', alarm: 's-alarm', notify: 's-notify', black: 's-black', calm: 's-calm', wolf: 's-wolf' };
+const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', alarm: 's-alarm', notify: 's-notify', calm: 's-calm', wolf: 's-wolf', voice: 's-voice', stt: 's-stt', chatSave: 's-chatSave' };
 function notifyNote() {
   if (!('Notification' in window)) return 'Not supported in this browser.';
   const p = Notification.permission;
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent), standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  if (p === 'denied') return 'Blocked. Turn on in iPhone Settings → Notifications → Zyntry.';
-  if (ios && !standalone) return 'On iPhone, add Zyntry to your Home Screen first (Share → Add to Home Screen), then turn this on.';
-  return 'Banner at the top of the screen when a session or break ends. Tip: iPhone Settings → Notifications → Zyntry → Banner Style: Persistent keeps it on screen.';
+  if (p === 'denied') return 'Blocked. Turn on in iPhone Settings → Notifications → ZENTRY.';
+  if (ios && !standalone) return 'On iPhone, add ZENTRY to your Home Screen first (Share → Add to Home Screen), then turn this on.';
+  return 'Banner at the top of the screen when a session or break ends. Tip: iPhone Settings → Notifications → ZENTRY → Banner Style: Persistent keeps it on screen.';
 }
 function renderSettings() {
   const s = settings();
@@ -537,7 +584,18 @@ function renderSettings() {
   $('s-volume').value = s.volume; $('s-ambient').value = s.ambient; $('s-ambVol').value = s.ambVol;
   document.querySelectorAll('.sw').forEach(b => b.classList.toggle('on', b.dataset.a === s.accent));
   $('notifyNote').textContent = notifyNote();
-  $('dataNote').textContent = `${store.history.length} sessions · ${store.tasks.length} tasks · saved on this device` + (volatile ? ' — WARNING: storage is blocked, data will be lost when you close the app' : '');
+  $('dataNote').textContent = `${store.history.length} sessions · ${store.activities.length} activities · ${store.tasks.length} tasks · saved on this device` + (volatile ? ' — WARNING: storage is blocked, data will be lost when you close the app' : '');
+  $('bgGrid').innerHTML = BACKGROUNDS.map(b => `<button type="button" class="bgopt ${b === s.bg ? 'on' : ''}" data-bg="${b}" aria-pressed="${b === s.bg}" aria-label="${BG_NAMES[b]} background"><span class="bgfill" data-bg="${b}"></span><span>${BG_NAMES[b]}</span></button>`).join('');
+  $('s-voiceVol').value = s.voiceVol;
+  const vs = voice.voices(); $('s-voiceName').innerHTML = '<option value="">Automatic (best available)</option>' + vs.map(v => `<option value="${esc(v.name)}" ${v.name === s.voiceName ? 'selected' : ''}>${esc(v.name)}${v.local ? '' : ' (online)'}</option>`).join('');
+  $('voiceNote').textContent = voice.supported ? 'Zyn speaks at key moments: session start and end, breaks, goals, level-ups. Never on every tap.' : 'Speech is not available in this browser — Zyn shows text instead.';
+  $('s-voice').disabled = !voice.supported; $('voiceTest').disabled = !voice.supported;
+  $('sttNote').textContent = listener.supported ? 'Talk instead of typing. You review the text before sending. Recognition is done by your browser/phone (Apple or Google may process the audio).' : 'Voice input is not supported in this browser.';
+  $('s-stt').disabled = !listener.supported;
+  const gl = Object.entries(store.goals);
+  $('goalList').innerHTML = gl.map(([n, g]) => `<div class="goalrow2"><span>${esc(labelOf(n))}</span><b>${esc(fmtQty(g.qty, g.unit))}/day</b><button class="btn-sm ghost" type="button" data-goal="${esc(n)}">Edit</button></div>`).join('')
+    + `<div class="goalrow2"><span class="muted">${gl.length ? '' : 'No activity goals yet.'}</span><button class="btn-sm" type="button" data-goal="">Add goal</button></div>`;
+  renderAI();
   $('ver').textContent = 'v' + APP_VERSION;
   offlineStatus();
 }
@@ -565,15 +623,61 @@ $('testNotify').onclick = async () => {
   let p = Notification.permission;
   try { if (p === 'default') p = await Notification.requestPermission(); } catch (e) {}
   if (p !== 'granted') return toast('Allow notifications first');
-  notify('🐺 Zyntry', 'Notifications work! You will see this when a session ends.', true); audio.unlock(); audio.play('breakDone');
+  notify('🐺 ZENTRY', 'Notifications work! You will see this when a session ends.', true); audio.unlock(); audio.play('breakDone');
 };
 $('s-ambient').addEventListener('change', e => { audio.unlock(); applySettings({ ambient: e.target.value }); });
 $('s-ambVol').addEventListener('input', e => { store.setSettings({ ambVol: +e.target.value }); syncAmbient(); });
 $('swatches').onclick = e => { const b = e.target.closest('.sw'); if (b) applySettings({ accent: b.dataset.a }); };
+$('bgGrid').onclick = e => { const b = e.target.closest('.bgopt'); if (b) { applySettings({ bg: b.dataset.bg }); audio.unlock(); audio.play('tap'); } };
+$('s-voiceVol').addEventListener('change', e => { store.setSettings({ voiceVol: +e.target.value }); voice.speak('This is my voice.', { force: true }); });
+$('s-voiceName').addEventListener('change', e => { store.setSettings({ voiceName: e.target.value }); voice.speak('Hi, I’m Zyn.', { force: true }); });
+$('voiceTest').onclick = () => voice.speak('Welcome back. Let’s get focused.', { force: true });
+$('goalList').onclick = e => { const b = e.target.closest('[data-goal]'); if (b) track.goalDialog(b.dataset.goal || undefined); };
+
+/* ---------- AI assistant settings ---------- */
+const webllm = createWebLLMEngine(() => settings().aiModel);
+const server = createServerEngine(() => ({ url: settings().aiUrl, api: settings().aiApi, model: settings().aiServerModel }));
+const engines = { rules: rulesEngine, webllm, server };
+async function renderAI() {
+  const s = settings();
+  document.querySelectorAll('#aiEngines input').forEach(r => { r.checked = r.value === s.ai; });
+  $('aiWebllm').hidden = s.ai !== 'webllm'; $('aiServer').hidden = s.ai !== 'server';
+  $('s-aiModel').innerHTML = WEBLLM_MODELS.map(m => `<option value="${m.id}" ${m.id === s.aiModel ? 'selected' : ''}>${m.name} — ${m.size}</option>`).join('');
+  $('s-aiUrl').value = s.aiUrl; $('s-aiApi').value = s.aiApi; $('s-aiServerModel').value = s.aiServerModel;
+  $('serverNote').textContent = isPrivateUrl(s.aiUrl) ? 'Your messages go only to this address on your device or local network.' : '⚠ This address is not on your device or local network — your messages would be sent there.';
+  $('webllmLoad').disabled = !webllm.supported() || webllm.loaded;
+  $('webllmStatus').textContent = (await webllm.status()).text;
+  aiStatus();
+}
+async function aiStatus() {
+  const s = settings(), e = engines[s.ai];
+  if (s.ai === 'rules') return chat.status('Built-in parser · offline · private');
+  const st = await e.status();
+  chat.status(`${e.name}${st.ready ? '' : ' (not ready — using built-in parser)'}${e.private ? ' · private' : ' · ⚠ remote'}`);
+}
+$('aiEngines').addEventListener('change', e => { if (e.target.name === 'ai') { store.setSettings({ ai: e.target.value }); renderAI(); } });
+$('s-aiModel').addEventListener('change', e => { store.setSettings({ aiModel: e.target.value }); webllm.unload(); renderAI(); });
+for (const [id, key] of [['s-aiUrl', 'aiUrl'], ['s-aiApi', 'aiApi'], ['s-aiServerModel', 'aiServerModel']]) $(id).addEventListener('change', e => { store.setSettings({ [key]: e.target.value.trim() }); renderAI(); });
+$('serverTest').onclick = async () => { $('serverStatus').textContent = 'Testing…'; $('serverStatus').textContent = (await server.status()).text; };
+webllm.onProgress(() => { $('webllmStatus').textContent = webllm.progress || '…'; $('webllmBar').hidden = !webllm.progress || webllm.progress === 'Ready'; });
+$('webllmLoad').onclick = async () => {
+  const m = WEBLLM_MODELS.find(x => x.id === settings().aiModel);
+  const ok = await dialog({ title: 'Download the AI model?', text: `${m.name}: ${m.size}.\nIt downloads once (Wi-Fi recommended), is stored on this device and then works offline. Your messages never leave the device.`, buttons: [{ label: 'Cancel', value: false, cls: 'ghost' }, { label: 'Download', value: true, primary: true }] });
+  if (ok !== true) return;
+  $('webllmLoad').disabled = true; $('webllmBar').hidden = false;
+  try { await webllm.load(); toast('On-device model ready'); } catch (e) { toast('Could not load the model: ' + e.message, 5000); }
+  $('webllmBar').hidden = true; renderAI();
+};
+$('webllmRemove').onclick = async () => {
+  const ok = await dialog({ title: 'Remove the downloaded model?', text: 'Frees the storage it uses. Zyn falls back to the built-in parser.', buttons: [{ label: 'Cancel', value: false, cls: 'ghost' }, { label: 'Remove', value: true, cls: 'danger' }] });
+  if (ok !== true) return;
+  try { await webllm.remove(); toast('Model removed'); } catch (e) { toast('Nothing to remove'); }
+  renderAI();
+};
 
 /* ---------- backup / restore / reset ---------- */
 $('exportBtn').onclick = async () => {
-  const data = JSON.stringify(store.exportData(), null, 1), name = `zyntry-backup-${dkey(Date.now())}.json`;
+  const data = JSON.stringify(store.exportData(), null, 1), name = `zentry-backup-${dkey(Date.now())}.json`;
   try {
     const file = new File([data], name, { type: 'application/json' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); toast('Backup shared'); return; }
@@ -586,7 +690,7 @@ $('importBtn').onclick = () => $('importFile').click();
 $('importFile').onchange = async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   const fail = text => dialog({ title: 'Cannot import', text, buttons: [{ label: 'OK', value: true, primary: true }] });
-  if (f.size > 25e6) return fail('That file is too large to be a Zyntry backup.');
+  if (f.size > 25e6) return fail('That file is too large to be a ZENTRY backup.');
   let parsed;
   try { parsed = parseBackup(JSON.parse(await f.text())); }
   catch (err) { return fail(err instanceof SyntaxError ? 'The file is not valid JSON.' : err.message || 'The file could not be read.'); }
@@ -600,7 +704,7 @@ $('importFile').onchange = async e => {
   if (!r) return;
   const res = store.importData(parsed, r);
   if (timer.task && !store.tasks.some(t => t.id === timer.task)) setTimer({ ...timer, task: null });
-  applyTheme(); renderAll(); toast(r === 'merge' ? `Merged ${res.sessions} sessions, ${res.tasks} tasks` : `Restored ${res.sessions} sessions, ${res.tasks} tasks`);
+  applyTheme(); renderAll(); toast(r === 'merge' ? `Merged ${res.sessions} sessions, ${res.activities} activities, ${res.tasks} tasks` : `Restored ${res.sessions} sessions, ${res.activities} activities, ${res.tasks} tasks`);
 };
 $('wipeBtn').onclick = async () => {
   const r = await dialog({
@@ -608,13 +712,13 @@ $('wipeBtn').onclick = async () => {
     buttons: [{ label: 'Cancel', value: false, cls: 'ghost', primary: true }, { label: 'Erase everything', value: true, cls: 'danger' }]
   });
   if (r !== true) return;
-  store.resetAll(); unlockScreen(); timer = store.timer; store.saveTimer(timer); histShown = 20; applyTheme(); renderAll(); toast('All data erased');
+  store.resetAll(); unlockScreen(); timer = store.timer; store.saveTimer(timer); histShown = 20; assistant.reset(); applyTheme(); renderAll(); chat.render(); toast('All data erased');
 };
 
 /* ---------- offline / update / install ---------- */
 async function offlineStatus() {
   let txt = 'Not ready yet — open the app once while online.';
-  try { if ('serviceWorker' in navigator && navigator.serviceWorker.controller && (await caches.keys()).some(k => k.startsWith('zyntry-'))) txt = 'Ready — works without internet.'; } catch (e) {}
+  try { if ('serviceWorker' in navigator && navigator.serviceWorker.controller && (await caches.keys()).some(k => k.startsWith('zentry-'))) txt = 'Ready — works without internet.'; } catch (e) {}
   $('offNote').textContent = txt;
 }
 function renderChip() {
@@ -652,8 +756,39 @@ try { navigator.storage && navigator.storage.persist && navigator.storage.persis
 // another tab/window changed the data: reload to stay consistent
 addEventListener('storage', e => { if (e.key && e.key.startsWith('sl.') && !e.key.endsWith('.corrupt') && !$('dlg').classList.contains('open')) location.reload(); });
 
+/* ---------- assistant: timer commands it may use (same guards as the buttons) ---------- */
+const startTimer = start, pauseTimer = pause;
+const timerApi = {
+  start({ mode = 'focus', minutes = null } = {}) {
+    if (timer.running) return { ok: false, text: `A ${NAMES[timer.mode].toLowerCase()} is already running (${fmtClock(TM.remaining(timer, Date.now()))} left). Say “pause” to pause it.` };
+    if (TM.inProgress(timer) && timer.mode === 'focus' && TM.elapsed(timer, Date.now()) >= 10000) return { ok: false, text: 'You have a paused focus session. Say “resume” — or reset it on the timer first.' };
+    setTimer(TM.newTimer({ ...settings(), [mode]: minutes || settings()[mode] }, mode, timer.completed, timer.task));
+    startTimer(); renderAll();
+    return { ok: true, text: `${NAMES[mode]} started — ${Math.round(timer.total / 60000)} minutes.${mode === 'focus' ? ' I’ll keep watch. 🐺' : ' Relax.'}` };
+  },
+  pause() { if (!timer.running) return { ok: false, text: 'Nothing is running right now.' }; pauseTimer(); return { ok: true, text: `Paused with ${fmtClock(TM.remaining(timer, Date.now()))} left.` }; },
+  resume() { if (timer.running) return { ok: false, text: 'The timer is already running.' }; if (!TM.inProgress(timer)) return { ok: false, text: 'There’s no paused session. Say “start a focus session”.' }; startTimer(); return { ok: true, text: 'Resumed. Back to it.' }; },
+  reset() { if (needsConfirm()) return { ok: false, text: 'That would abandon your focus session. If you really want that, use the reset button on the timer.' }; abandonCurrent(); resetTo(timer.mode); return { ok: true, text: 'Timer reset.' }; },
+  skip() { if (needsConfirm()) return { ok: false, text: 'That would abandon your focus session. Use the skip button on the timer if you mean it.' }; abandonCurrent(); resetTo(timer.mode === 'focus' ? 'short' : 'focus'); return { ok: true, text: `Switched to ${NAMES[timer.mode].toLowerCase()}.` }; },
+  liveFocusSec: () => liveSec()
+};
+const assistant = createAssistant({ store, engines, timer: timerApi });
+
+// a record was saved (chat or Track): refresh everything from the store and let Zyn react to real progress
+function activityEvent(records) {
+  if (!records || !records.length) return;
+  const today = dkey(Date.now()), prog = goalProgress(store.activities, store.goals, today);
+  const reached = prog.filter(g => g.met && records.some(r => r.name === g.name && r.unit === g.unit && r.day === today) &&
+    g.done - records.filter(r => r.name === g.name && r.unit === g.unit && r.day === today).reduce((a, r) => a + r.qty, 0) < g.target);
+  if (reached.length) { wolf.react('howl', 3200, `${reached[0].label} goal reached!`); audio.play('levelUp'); voice.speak(`You reached your daily ${reached[0].label.toLowerCase()} goal.`, { priority: true }); }
+  else { wolf.react('happy', 2200); audio.play('task'); }
+}
+const chat = initChat({ store, assistant, $, wolfSVG, listener, toast, dialog,
+  onReply: r => { if (r.kind === 'saved') { renderAll(); activityEvent(r.records); } } });
+const track = initTrack({ store, $, esc, toast, dialog, onChange: r => { renderAll(); if (r && r.records) activityEvent(r.records); } });
+
 /* ---------- boot ---------- */
-function renderAll() { renderTimer(); renderChip(); if (view === 'tasksView') renderTasks(); if (view === 'statsView') { lastStats = ''; renderStats(); } if (view === 'settingsView') renderSettings(); }
+function renderAll() { renderTimer(); renderChip(); if (view === 'tasksView') renderTasks(); if (view === 'statsView') { lastStats = ''; renderStats(); } if (view === 'settingsView') renderSettings(); if (view === 'trackView') track.render(); if (view === 'chatView') chat.micVisible(); }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { tick(); renderTimer(); lockScreen(); } });
 
 applyTheme();
@@ -667,6 +802,10 @@ setTimeout(() => {
     : v === 'tired' || v === 'lonely' ? wolf.line(v)
     : (h < 12 ? 'Good morning! ' : h < 18 ? 'Hey there! ' : 'Evening hunt? ') + wolf.line('idle'));
 }, 700);
+// spoken welcome: at most once per day, never while a session runs
+try { if (settings().voice && !timer.running && localStorage.getItem('sl.voiceDay') !== dkey(Date.now())) { localStorage.setItem('sl.voiceDay', dkey(Date.now())); const once = () => { voice.speak(wolfBase() === 'serious' ? 'Welcome back. Yesterday slipped — today we hunt.' : 'Welcome back. Let’s get focused.'); removeEventListener('pointerdown', once, true); }; addEventListener('pointerdown', once, true); } } catch (e) {}
+lastBase = wolfBase();
+{ const qv = new URLSearchParams(location.search).get('view'); if (['timerView', 'tasksView', 'chatView', 'trackView', 'statsView', 'settingsView'].includes(qv)) go(qv); }   // home-screen shortcuts
 setInterval(tick, 250);
 if (timer.running) { lockScreen(); tick(); }
 if (store.warnings.length) setTimeout(() => toast('Some saved data could not be read. A copy was kept on this device.', 5000), 600);
