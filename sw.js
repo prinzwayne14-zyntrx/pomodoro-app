@@ -1,12 +1,12 @@
 // Bump VERSION on each release (and APP_VERSION in js/app.js; a unit test checks they match).
 // User data lives in localStorage, which a service-worker update never touches.
-const VERSION = '6.0.0';
+const VERSION = '7.0.0';
 const CACHE = 'zentry-' + VERSION;
 const OLD = ['zyntry-', 'solo-leveling-'];             // caches from the app's previous names
 const VENDOR = 'zentry-vendor';                         // large, versioned libraries: kept across app updates
 const ASSETS = [
-  './', 'index.html', 'style.css', 'manifest.webmanifest',
-  'js/app.js', 'js/rpg.js', 'js/store.js', 'js/timer.js', 'js/audio.js', 'js/wolf.js', 'js/voice.js', 'js/catalog.js', 'js/analytics.js',
+  './', 'index.html', 'style.css', 'manifest.webmanifest', 'fonts/fredoka.woff2', 'fonts/nunito.woff2',
+  'js/app.js', 'js/zynvoice.js', 'js/rpg.js', 'js/store.js', 'js/timer.js', 'js/audio.js', 'js/wolf.js', 'js/voice.js', 'js/catalog.js', 'js/analytics.js',
   'js/ai/nlu.js', 'js/ai/validate.js', 'js/ai/assistant.js', 'js/ai/engines.js', 'js/ui/chat.js', 'js/ui/track.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/maskable-512.png', 'icons/favicon-32.png'
 ];

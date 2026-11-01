@@ -4,6 +4,7 @@ import * as TM from './timer.js';
 import { createAudio } from './audio.js';
 import { createWolf, wolfSVG } from './wolf.js';
 import { createVoice, createListener } from './voice.js';
+import { createZynVoice } from './zynvoice.js';
 import { createAssistant } from './ai/assistant.js';
 import { rulesEngine, createWebLLMEngine, createServerEngine, WEBLLM_MODELS, isPrivateUrl } from './ai/engines.js';
 import { initChat } from './ui/chat.js';
@@ -12,7 +13,7 @@ import { fmtQty, labelOf } from './catalog.js';
 import { goalProgress } from './analytics.js';
 import { BACKGROUNDS } from './store.js';
 
-const APP_VERSION = '6.0.0';
+const APP_VERSION = '7.0.0';
 const APP_NAME = 'ZENTRY';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -32,7 +33,8 @@ let timer = store.timer;
 const setTimer = t => { timer = t; store.saveTimer(t); };
 const audio = createAudio(settings);
 const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
-const voice = createVoice(settings);
+const zynVoice = createZynVoice({ context: () => audio.context(), output: () => audio.voiceOut() });
+const voice = createVoice(settings, zynVoice, audio);
 const listener = createListener();
 
 /* ---------- small UI helpers ---------- */
@@ -66,25 +68,34 @@ document.addEventListener('keydown', e => {
     else if (e.key === 'Enter' && e.target.matches('#dlgBox input')) { e.preventDefault(); const p = dlgButtons.find(b => b.primary); if (p) closeDlg(p.value); }
     return;
   }
-  if (e.code === 'Space' && e.target === document.body && view === 'timerView') { e.preventDefault(); toggle(); }
+  if (e.target !== document.body || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (view !== 'timerView') return;
+  // desktop shortcuts: Space start/pause · R reset · S skip · F focus mode · 1 2 3 modes · + add 5 min
+  if (e.code === 'Space') { e.preventDefault(); toggle(); }
+  else if (e.key === 'r' || e.key === 'R') doReset();
+  else if (e.key === 's' || e.key === 'S') doSkip();
+  else if (e.key === 'f' || e.key === 'F') setZen(document.body.dataset.zen !== '1');
+  else if (e.key === 'Escape' && document.body.dataset.zen === '1') setZen(false);
+  else if (e.key === '1' || e.key === '2' || e.key === '3') switchMode(['focus', 'short', 'long'][+e.key - 1]);
+  else if (e.key === '+' || e.key === '=') extend();
 });
 
 const fmtClock = ms => { const s = Math.ceil(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
 const fmtMin = sec => { const m = Math.round(sec / 60); return m >= 60 ? Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm' : m + 'm'; };
-const R = 48, C = 2 * Math.PI * R;
+const R = 53, C = 2 * Math.PI * R;
 const NAMES = { focus: 'Focus', short: 'Short break', long: 'Long break' };
 const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.2v13.6a.6.6 0 0 0 .92.5l10.6-6.8a.6.6 0 0 0 0-1L8.92 4.7A.6.6 0 0 0 8 5.2z"/></svg>';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
 /* ---------- theme ---------- */
-const BG_COLOR = { aurora: '#07080f', amoled: '#000000', charcoal: '#131417', midnight: '#0d1838', purple: '#150a27', gradient: '#111b3c', wolf: '#0c1232', mountains: '#141a3a', forest: '#06201b', light: '#f3f4f8' };
-const BG_NAMES = { aurora: 'Aurora', amoled: 'AMOLED', charcoal: 'Charcoal', midnight: 'Midnight', purple: 'Purple', gradient: 'Dusk', wolf: 'Wolf moon', mountains: 'Mountains', forest: 'Forest', light: 'Light' };
+const BG_COLOR = { den: '#15123a', aurora: '#07080f', amoled: '#000000', charcoal: '#131417', midnight: '#0d1838', purple: '#150a27', gradient: '#111b3c', wolf: '#0c1232', mountains: '#141a3a', forest: '#06201b', light: '#f3f4f8' };
+const BG_NAMES = { den: 'Night den', aurora: 'Aurora', amoled: 'AMOLED', charcoal: 'Charcoal', midnight: 'Midnight', purple: 'Purple', gradient: 'Dusk', wolf: 'Wolf moon', mountains: 'Mountains', forest: 'Forest', light: 'Light' };
 function applyTheme() {
   const s = settings(), b = document.body;
   b.dataset.accent = s.accent; b.dataset.calm = s.calm ? '1' : '0'; b.dataset.wolf = s.wolf ? '1' : '0';
   b.dataset.bg = s.bg; b.dataset.theme = s.bg === 'light' ? 'light' : 'dark'; $('backdrop').dataset.bg = s.bg;
-  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = BG_COLOR[s.bg] || '#07080f';
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = BG_COLOR[s.bg] || '#15123a';
 }
 
 /* ---------- timer view ---------- */
@@ -92,8 +103,8 @@ const progress = $('progress'), endcap = $('endcap');
 progress.style.strokeDasharray = C;
 (function ticks() {
   let s = '';
-  for (let i = 0; i < 60; i++) {
-    const a = i * Math.PI / 30, big = i % 5 === 0, r1 = big ? 55 : 56.4, r2 = 58.6;
+  for (let i = 0; i < 60; i += 5) {
+    const a = i * Math.PI / 30, big = i % 15 === 0, r1 = big ? 41.5 : 42.6, r2 = 44;
     s += `<line class="tick ${big ? 'big' : ''}" x1="${60 + r1 * Math.sin(a)}" y1="${60 - r1 * Math.cos(a)}" x2="${60 + r2 * Math.sin(a)}" y2="${60 - r2 * Math.cos(a)}"/>`;
   }
   $('ticks').innerHTML = s;
@@ -109,6 +120,13 @@ function renderClock() {
   endcap.setAttribute('cx', 60 + R * Math.cos(th)); endcap.setAttribute('cy', 60 + R * Math.sin(th));
   endcap.style.display = frac > 0 ? '' : 'none';
 }
+const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function renderRunline() {
+  const on = TM.inProgress(timer);
+  $('runline').classList.toggle('on', on);
+  $('endsAt').textContent = timer.running ? `Ends at ${fmtTime(timer.endAt)}` : on ? 'Paused' : `${Math.round(timer.total / 60000)} min · tap the time to change`;
+  $('extend').hidden = !on || timer.total >= 180 * 60000;
+}
 function renderTimer() {
   const now = Date.now(), ms = TM.remaining(timer, now);
   $('label').innerHTML = (timer.running ? '<span class="live"></span>' : '') + NAMES[timer.mode];
@@ -118,26 +136,28 @@ function renderTimer() {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode === timer.mode));
   const dots = $('dots'); dots.innerHTML = '';
   for (let i = 0; i < settings().rounds; i++) { const d = document.createElement('span'); d.className = 'dot' + (i < timer.completed ? ' done' : ''); dots.appendChild(d); }
-  $('taskName').textContent = (timer.task && store.taskTitle(timer.task)) || 'None';
+  const tk = timer.task && store.tasks.find(x => x.id === timer.task);
+  $('taskName').textContent = tk ? tk.title : 'Pick a task'; $('taskChip').classList.toggle('on', !!tk);
+  $('taskProg').textContent = tk && tk.est ? `${tk.n}/${tk.est}` : ''; $('taskProg').classList.toggle('over', !!(tk && tk.est && tk.n >= tk.est));
   const li = levelInfo(store.totalXp());
   const dz = discipline(store.history, Date.now());
   wolf.stage(dz.stage.n); wolf.mood(dz.vitality); $('lvlWolf').dataset.stage = String(dz.stage.n);
   $('player').dataset.rank = li.rank; $('rankName').textContent = 'Rank ' + li.rank + ' · ' + RANKS.find(r => r.r === li.rank).title;
   $('stageName').textContent = dz.stage.name;
   checkEvolution(dz);
-  wolf.set(wolfBase(), { talk: booted });
+  wolf.set(wolfBase(), { talk: booted, voice: settings().chatty });
   $('chatWolf').dataset.stage = String(dz.stage.n); $('chatWolf').dataset.mood = dz.vitality;
   const td = todayInfo();
-  $('goalTxt').innerHTML = `<b>${td.n}</b> / ${settings().goal} today`; $('goalTxt').classList.toggle('met', td.n >= settings().goal);
+  $('goalTxt').innerHTML = `<b>${td.n}</b> of ${settings().goal} today${td.sec >= 60 ? ` · ${fmtMin(td.sec)}` : ''}`; $('goalTxt').classList.toggle('met', td.n >= settings().goal);
   $('streakN').textContent = td.streak; $('streakChip').classList.toggle('hot', td.streak > 0);
   syncAmbient();
   $('lvNum').textContent = li.level; $('rankLetter').textContent = li.rank;
   $('xpNum').textContent = li.into + ' / ' + li.need + ' XP'; $('xpBar').style.width = (li.into / li.need * 100) + '%';
-  lastClock = ''; renderClock();
+  lastClock = ''; renderClock(); renderRunline();
 }
 
 /* ---------- wolf, goal, focus sounds ---------- */
-const wolf = createWolf($('wolf'), $('bubble'));
+const wolf = createWolf($('wolf'), $('bubble'), voice);
 $('lvlWolf').innerHTML = wolfSVG();
 let booted = false;
 // Zyn's mood follows what is actually happening (never random):
@@ -155,10 +175,11 @@ function wolfBase() {
 let lastBase = '';
 function todayInfo() {
   const s = stats(store.history, store.tasks, Date.now());
-  return { n: s.todayN, streak: s.streak };
+  return { n: s.todayN, streak: s.streak, sec: s.todaySec };
 }
 $('stageChip').onclick = () => { audio.unlock(); audio.play('tap'); go('statsView'); };
-$('wolf').onclick = () => { audio.unlock(); audio.play('tap'); buzz(15); const l = wolf.line('tap'); wolf.react('happy', 1800, l); voice.speak(l); };
+$('player').onclick = () => { audio.unlock(); audio.play('tap'); go('statsView'); };
+$('wolf').onclick = () => { audio.unlock(); buzz(15); wolf.react('happy', 2200, wolf.line('tap'), { priority: true, force: settings().voice }); };
 const AMB_NAMES = { off: 'Off', rain: 'Rain', brown: 'Brown noise', waves: 'Waves', white: 'White noise' };
 const AMB_ORDER = ['off', 'rain', 'brown', 'waves', 'white'];
 function syncAmbient() {
@@ -207,7 +228,10 @@ function start() {
   const fresh = !TM.inProgress(timer);
   setTimer(TM.start(timer, Date.now())); countSec = null;
   lockScreen(); renderTimer();
-  if (fresh) voice.speak(timer.mode === 'focus' ? 'Your focus session is starting. Let’s get focused.' : timer.mode === 'long' ? 'Long break. You earned it.' : 'Time for a short break.');
+  if (fresh) {                                              // a fresh start always gets a spoken line, even when Zyn is not chatty
+    const l = timer.mode === 'focus' ? wolf.line('focus') : timer.mode === 'long' ? ['Long break! You earned it.', 'happy', 'yipyip'] : wolf.line('rest');
+    wolf.say(l, { priority: true });
+  }
 }
 function pause() {
   audio.play('pause'); setTimer(TM.pause(timer, Date.now())); unlockScreen(); renderTimer();
@@ -264,14 +288,13 @@ function finish(n) {
   if (t.mode === 'focus') {
     if (fresh) { alarm('focusDone'); buzz([200, 100, 200, 100, 300]); }
     const g = settings().goal, goalNow = todayInfo().n;
-    if (added && goalBefore < g && goalNow >= g) { wolf.react('howl', 3600, wolf.line('goal')); voice.speak('You reached your daily goal. Excellent work.', { priority: true }); setTimeout(() => toast(`Daily goal reached · ${goalNow}/${g} 🎯`, 3600), 3700); }
-    else if (added) { wolf.react('happy', 3200, wolf.line('done') + (entry.x ? ` +${entry.x} XP` : '')); if (fresh) voice.speak(`Excellent work. You completed another session. ${nx.mode === 'long' ? 'Take a long break.' : 'Time for a short break.'}`, { priority: true }); }
+    if (added && goalBefore < g && goalNow >= g) { wolf.react('howl', 3600, wolf.line('goal'), { priority: true, voice: fresh }); setTimeout(() => toast(`Daily goal reached · ${goalNow}/${g}`, 3600), 3700); }
+    else if (added) { const [t1, m1, s1] = wolf.line('done'); wolf.react('happy', 3400, [`${t1} ${nx.mode === 'long' ? 'Long break time!' : 'Take a short break.'}`, m1, s1], { priority: true, voice: fresh }); }
     if (added) toast(entry.x ? `Session complete · +${entry.x} XP` : 'Session complete · no XP (under 10 min)', 3600);
     notify('🐺 Focus complete!', (entry && entry.x ? `+${entry.x} XP. ` : '') + (nx.mode === 'long' ? `Long break: ${settings().long} min. You earned it.` : `Take a ${settings().short}-min break.`) + (t.task && store.taskTitle(t.task) ? ` · ${store.taskTitle(t.task)}` : ''));
   } else {
     if (fresh) { alarm('breakDone'); buzz([200, 100, 200]); }
-    toast('Break over — ready to focus', 3000); wolf.react('happy', 2200, 'Break’s over. Back on the hunt?');
-    if (fresh) voice.speak('Break is over. Let’s get focused.', { priority: true });
+    toast('Break over — ready to focus', 3000); wolf.react('happy', 2600, ['Break’s over! Back on the hunt?', 'excited', 'yipyip'], { priority: true, voice: fresh });
     notify('⏰ Break is over', `Zyn is ready. Next: ${settings().focus}-min focus.`);
   }
   if (!fresh) toast('Your session finished while you were away', 4000);
@@ -285,7 +308,7 @@ function celebrate(c) {
   $('lvlT').textContent = c.kicker; $('lvlN').textContent = c.big; $('lvlS').textContent = c.sub;
   $('lvl').dataset.kind = c.kind; $('lvl').classList.add('show');
   wolf.react('howl', 3200); audio.play(c.sound); buzz([60, 40, 60, 40, 200]);
-  setTimeout(() => voice.speak(c.kind === 'evolve' ? `I evolved. I'm now a ${c.big}.` : c.kind === 'rank' ? `Rank up. You are now rank ${c.big}.` : `Level up. You reached level ${c.big}.`), 1400);
+  setTimeout(() => voice.speak(c.kind === 'evolve' ? `Wow! I evolved! I'm a ${c.big} now!` : c.kind === 'rank' ? `Rank up! You're rank ${c.big} now!` : `Level up! Level ${c.big}!`, { mood: 'excited', sound: c.kind === 'level' ? 'yipyip' : 'awoo', priority: true }), 900);
   clearTimeout(celebrate.t); celebrate.t = setTimeout(closeCelebrate, c.ms || 3400);
 }
 function closeCelebrate() { $('lvl').classList.remove('show'); const n = celebrateQ.shift(); if (n) setTimeout(() => celebrate(n), 250); }
@@ -313,14 +336,56 @@ function tick() {
     if (settings().ticks && s <= 3 && s !== countSec && document.visibilityState === 'visible') { countSec = s; audio.play('count'); }
     if (timer.mode === 'focus' && timer.total > 180000 && s <= 60 && s >= 57 && warned !== timer.sid) {
       warned = timer.sid; toast('1 minute left'); audio.play('warn'); notify('⏳ 1 minute left', 'Finish strong.');
+      wolf.say(['One minute left! Finish strong!', 'excited', 'yip'], { priority: true });
     }
     renderClock();
-    const b = wolfBase(); if (b !== lastBase) { lastBase = b; wolf.set(b, { talk: true }); }
+    const b = wolfBase(); if (b !== lastBase) { lastBase = b; wolf.set(b, { talk: true, voice: settings().chatty }); }
+    if (timer.running && lastEnds !== timer.endAt) { lastEnds = timer.endAt; renderRunline(); }
   } else if (reloadPending && !$('dlg').classList.contains('open')) { location.reload(); return; }
   if (view === 'statsView') renderStats();
 }
 
+let lastEnds = 0;
 $('toggle').onclick = toggle;
+/* ---------- extra time, session length, focus mode ---------- */
+function extend() {
+  if (!TM.inProgress(timer) || timer.total >= 180 * 60000) return;
+  audio.unlock(); audio.play('tap'); setTimer(TM.addTime(timer, 5 * 60000, Date.now())); renderTimer();
+  toast(`+5 min · ${timer.running ? 'ends at ' + fmtTime(timer.endAt) : Math.ceil(TM.remaining(timer, Date.now()) / 60000) + ' min left'}`);
+}
+$('extend').onclick = extend;
+const PRESETS = [
+  { id: 'classic', name: 'Classic', focus: 25, short: 5, long: 15, note: 'The original Pomodoro' },
+  { id: 'deep', name: 'Deep work', focus: 50, short: 10, long: 20, note: 'Long blocks for hard tasks' },
+  { id: 'flow', name: 'Flow', focus: 90, short: 15, long: 30, note: 'One big block, one real rest' },
+  { id: 'sprint', name: 'Sprint', focus: 15, short: 3, long: 10, note: 'Easy start on a low-energy day' }
+];
+const presetOf = s => PRESETS.find(p => p.focus === s.focus && p.short === s.short && p.long === s.long);
+function presetButtons(cls = '') {
+  const cur = presetOf(settings());
+  return PRESETS.map(p => `<button type="button" class="preset ${cls} ${cur && cur.id === p.id ? 'on' : ''}" data-resolve="${p.id}" data-preset="${p.id}"><b>${p.focus}<small>/${p.short}</small></b><span>${p.name}</span><em>${p.note}</em></button>`).join('');
+}
+function applyPreset(id) {
+  const p = PRESETS.find(x => x.id === id); if (!p) return;
+  if (TM.inProgress(timer)) { toast('Finish or reset this session first'); return; }
+  applySettings({ focus: p.focus, short: p.short, long: p.long }); audio.play('tap'); toast(`${p.name}: ${p.focus} min focus, ${p.short} min break`);
+}
+$('clockBtn').onclick = async () => {
+  audio.unlock();
+  if (TM.inProgress(timer)) { toast(timer.running ? 'Pause or reset to change the length · +5 min adds time' : 'Reset to change the length'); return; }
+  const v = await dialog({ title: 'Session length', text: 'Pick a rhythm. You can fine-tune minutes in Settings.', body: `<div class="presets">${presetButtons()}</div>`, buttons: [{ label: 'Close', value: null, cls: 'ghost' }, { label: 'Custom…', value: '__custom' }] });
+  if (v === '__custom') go('settingsView'); else if (v) applyPreset(v);
+};
+function setZen(on) {
+  document.body.dataset.zen = on ? '1' : '0';
+  try {
+    if (on && document.documentElement.requestFullscreen && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  } catch (e) {}
+}
+$('zenBtn').onclick = () => { audio.unlock(); audio.play('tap'); setZen(true); };
+$('zenExit').onclick = () => setZen(false);
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && document.body.dataset.zen === '1') setZen(false); });
 $('reset').onclick = doReset;
 $('skip').onclick = doSkip;
 $('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) switchMode(b.dataset.mode); };
@@ -350,14 +415,17 @@ function taskList() {
 }
 function renderTasks() {
   document.querySelectorAll('#taskFilter button').forEach(b => b.classList.toggle('active', b.dataset.f === filter));
+  { const tk0 = dkey(Date.now()), open = store.tasks.filter(t => !t.done), left = open.reduce((a, t) => a + Math.max(0, t.est - t.n), 0), doneToday = store.tasks.filter(t => t.done && dkey(t.doneAt) === tk0).length;
+    $('tasksSub').textContent = !store.tasks.length ? 'Plan today, then pick a task on the timer.' : `${open.length} open · ${doneToday} done today` + (left ? ` · about ${left} session${left === 1 ? '' : 's'} (${fmtMin(left * settings().focus * 60)}) left` : ''); }
   const l = taskList(), tk = dkey(Date.now());
   const empty = { today: 'Nothing planned for today.\nAdd a task above, then pick it on the Timer screen.', open: 'No open tasks.', done: 'No completed tasks yet.' }[filter];
   $('taskList').innerHTML = l.length ? l.map(t => {
-    const meta = [t.n ? `${t.n} focus session${t.n === 1 ? '' : 's'}` : '', !t.done && t.day < tk ? 'carried over' : '', PRI[t.pri] + ' priority'].filter(Boolean).join(' · ');
+    const meta = [t.est ? `${t.n} of ${t.est} sessions` : t.n ? `${t.n} focus session${t.n === 1 ? '' : 's'}` : '', !t.done && t.day < tk ? 'carried over' : '', PRI[t.pri] + ' priority'].filter(Boolean).join(' · ');
+    const est = t.est ? `<span class="estbar" aria-hidden="true">${Array.from({ length: Math.max(t.est, Math.min(t.n, 12)) }, (_, i) => `<i class="${i < t.n ? (i < t.est ? 'd' : 'x') : ''}"></i>`).join('')}</span>` : '';
     const on = timer.task === t.id;
     return `<div class="glass task ${t.done ? 'done' : ''}" data-id="${esc(t.id)}">
       <button class="ck" data-act="toggle" aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}">${ICON_CHECK}</button>
-      <button class="tt" data-act="edit">${esc(t.title)}<span class="meta">${esc(meta)}</span></button>
+      <button class="tt" data-act="edit">${esc(t.title)}<span class="meta">${esc(meta)}</span>${est}</button>
       <span class="pri p${t.pri}" aria-hidden="true"></span>
       ${t.done ? '' : `<button class="pick ${on ? 'on' : ''}" data-act="focus">${on ? 'Active' : 'Focus'}</button>`}
     </div>`;
@@ -366,7 +434,7 @@ function renderTasks() {
 $('taskForm').addEventListener('submit', e => {
   e.preventDefault();
   const v = $('taskInput').value.trim(); if (!v) return;
-  store.addTask(v, +$('taskPri').value); $('taskInput').value = ''; audio.play('tap'); renderTasks();
+  store.addTask(v, +$('taskPri').value, +$('taskEstSel').value); $('taskInput').value = ''; $('taskEstSel').value = '0'; audio.play('tap'); renderTasks();
 });
 $('taskFilter').onclick = e => { const b = e.target.closest('button'); if (b) { filter = b.dataset.f; renderTasks(); } };
 $('taskList').onclick = async e => {
@@ -382,10 +450,10 @@ $('taskList').onclick = async e => {
   } else if (act === 'edit') {
     const r = await dialog({
       title: 'Edit task',
-      body: `<input type="text" id="edTitle" maxlength="120" value="${esc(t.title)}" aria-label="Task title"><select id="edPri" class="opt" style="width:100%">${[1, 2, 3].map(p => `<option value="${p}" ${p === t.pri ? 'selected' : ''}>${PRI[p]} priority</option>`).join('')}</select>`,
+      body: `<input type="text" id="edTitle" maxlength="120" value="${esc(t.title)}" aria-label="Task title"><label for="edPri">Priority</label><select id="edPri">${[1, 2, 3].map(p => `<option value="${p}" ${p === t.pri ? 'selected' : ''}>${PRI[p]} priority</option>`).join('')}</select><label for="edEst">Estimated focus sessions</label><select id="edEst">${[0, 1, 2, 3, 4, 5, 6, 8, 10, 12].map(n => `<option value="${n}" ${n === t.est ? 'selected' : ''}>${n ? n + ' session' + (n === 1 ? '' : 's') : 'No estimate'}</option>`).join('')}</select>`,
       buttons: [{ label: 'Delete', value: 'del', cls: 'danger' }, { label: 'Cancel', value: null, cls: 'ghost' }, { label: 'Save', value: 'save', primary: true }]
     });
-    if (r === 'save') { const title = $('edTitle').value.trim(); if (title) store.updateTask(id, { title, pri: +$('edPri').value }); }
+    if (r === 'save') { const title = $('edTitle').value.trim(); if (title) store.updateTask(id, { title, pri: +$('edPri').value, est: +$('edEst').value }); }
     else if (r === 'del') {
       const ok = await dialog({ title: 'Delete task?', text: `"${t.title}" will be removed. Your recorded sessions are kept.`, buttons: [{ label: 'Cancel', value: false, cls: 'ghost', primary: true }, { label: 'Delete', value: true, cls: 'danger' }] });
       if (ok === true) { store.deleteTask(id); if (timer.task === id) setTimer({ ...timer, task: null }); }
@@ -396,7 +464,7 @@ $('taskList').onclick = async e => {
 $('taskChip').onclick = async () => {
   const open = store.tasks.filter(t => !t.done).sort((a, b) => a.pri - b.pri || a.created - b.created);
   const body = `<button class="opt ${!timer.task ? 'on' : ''}" data-resolve="">No task</button>` +
-    open.map(t => `<button class="opt ${timer.task === t.id ? 'on' : ''}" data-resolve="${esc(t.id)}"><span class="pri p${t.pri}"></span>${esc(t.title)}</button>`).join('');
+    open.map(t => `<button class="opt ${timer.task === t.id ? 'on' : ''}" data-resolve="${esc(t.id)}"><span class="pri p${t.pri}"></span><span class="ot">${esc(t.title)}</span>${t.est ? `<small>${t.n}/${t.est}</small>` : ''}</button>`).join('');
   const add = `<input type="text" id="quickTask" maxlength="120" placeholder="New task — type and press Add" aria-label="New task">`;
   const v = await dialog({ title: 'Focus on…', body: add + body, buttons: [{ label: 'Close', value: null, cls: 'ghost' }, { label: 'Add & focus', value: '__new', primary: true }] });
   if (v === null) return;
@@ -476,7 +544,7 @@ function renderStats() {
       <div class="hstats">
         <div class="k">${live ? '<span class="live"></span>' : ''}Focus today</div>
         <div class="big">${fmtMin(s.todaySec)}</div>
-        <div class="hmini"><span><b>+${s.todayXp}</b> XP</span><span><b>${s.todayN}</b> sessions</span><span><b>${s.tasksDoneToday}</b> tasks</span></div>
+        <div class="hmini"><span><b>+${s.todayXp}</b> XP</span><span><b>${s.todayN}</b> session${s.todayN === 1 ? '' : 's'}</span><span><b>${s.tasksDoneToday}</b> task${s.tasksDoneToday === 1 ? '' : 's'}</span></div>
       </div>
     </div>
 
@@ -484,7 +552,7 @@ function renderStats() {
       <div class="ztop">
         <div class="wolf mini" id="zynStat" data-state="idle" data-stage="${dz.stage.n}" data-mood="${dz.vitality}"></div>
         <div class="zinfo">
-          <div class="k">Zyn · Evolution</div>
+          <div class="k">Zyn's evolution</div>
           <div class="zname">${dz.stage.name}<small>Stage ${dz.stage.n} of ${STAGES.length}</small></div>
           <div class="bar"><i style="width:${dz.frac * 100}%"></i></div>
           <div class="zsub">${dz.next ? `<b>${dz.points}</b> / ${dz.next.min} discipline pts → ${dz.next.name}` : `<b>${dz.points}</b> discipline pts · fully evolved`}</div>
@@ -568,7 +636,7 @@ $('statsView').onclick = e => {
 };
 
 /* ---------- settings ---------- */
-const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', alarm: 's-alarm', notify: 's-notify', calm: 's-calm', wolf: 's-wolf', voice: 's-voice', stt: 's-stt', chatSave: 's-chatSave' };
+const NUM = { focus: 's-focus', short: 's-short', long: 's-long', rounds: 's-rounds', goal: 's-goal' }, BOOLS = { auto: 's-auto', sound: 's-sound', ticks: 's-ticks', alarm: 's-alarm', notify: 's-notify', calm: 's-calm', wolf: 's-wolf', voice: 's-voice', chatty: 's-chatty', stt: 's-stt', chatSave: 's-chatSave' };
 function notifyNote() {
   if (!('Notification' in window)) return 'Not supported in this browser.';
   const p = Notification.permission;
@@ -588,8 +656,11 @@ function renderSettings() {
   $('bgGrid').innerHTML = BACKGROUNDS.map(b => `<button type="button" class="bgopt ${b === s.bg ? 'on' : ''}" data-bg="${b}" aria-pressed="${b === s.bg}" aria-label="${BG_NAMES[b]} background"><span class="bgfill" data-bg="${b}"></span><span>${BG_NAMES[b]}</span></button>`).join('');
   $('s-voiceVol').value = s.voiceVol;
   const vs = voice.voices(); $('s-voiceName').innerHTML = '<option value="">Automatic (best available)</option>' + vs.map(v => `<option value="${esc(v.name)}" ${v.name === s.voiceName ? 'selected' : ''}>${esc(v.name)}${v.local ? '' : ' (online)'}</option>`).join('');
-  $('voiceNote').textContent = voice.supported ? 'Zyn speaks at key moments: session start and end, breaks, goals, level-ups. Never on every tap.' : 'Speech is not available in this browser — Zyn shows text instead.';
-  $('s-voice').disabled = !voice.supported; $('voiceTest').disabled = !voice.supported;
+  $('voiceNote').textContent = 'Zyn speaks on its own at key moments: when you open the app, start, finish, take a break, hit a goal. The words always appear in the speech bubble.';
+  document.querySelectorAll('#voiceStyle button').forEach(b => { b.classList.toggle('active', b.dataset.v === s.voiceStyle); b.disabled = b.dataset.v === 'device' && !voice.deviceSupported; });
+  document.querySelectorAll('#voicePitch button').forEach(b => b.classList.toggle('active', b.dataset.p === s.voicePitch));
+  $('pitchRow').hidden = s.voiceStyle !== 'zyn'; $('deviceVoiceRow').hidden = s.voiceStyle !== 'device';
+  $('presets').innerHTML = presetButtons('wide');
   $('sttNote').textContent = listener.supported ? 'Talk instead of typing. You review the text before sending. Recognition is done by your browser/phone (Apple or Google may process the audio).' : 'Voice input is not supported in this browser.';
   $('s-stt').disabled = !listener.supported;
   const gl = Object.entries(store.goals);
@@ -608,7 +679,7 @@ function applySettings(patch) {
   renderSettings(); renderTimer(); renderChip();
 }
 for (const k in NUM) $(NUM[k]).addEventListener('change', e => { const v = parseInt(e.target.value, 10); applySettings(Number.isFinite(v) ? { [k]: v } : {}); });
-for (const k in BOOLS) if (k !== 'notify') $(BOOLS[k]).addEventListener('change', e => { applySettings({ [k]: e.target.checked }); if (k === 'sound' && e.target.checked) { audio.unlock(); audio.play('tap'); } });
+for (const k in BOOLS) if (k !== 'notify') $(BOOLS[k]).addEventListener('change', e => { applySettings({ [k]: e.target.checked }); if (k === 'sound' && e.target.checked) { audio.unlock(); audio.play('tap'); } if (k === 'voice' && e.target.checked) voiceDemo(); if (k === 'voice' && !e.target.checked) voice.stop(); });
 $('s-notify').addEventListener('change', async e => {
   if (e.target.checked) {
     let p = 'denied';
@@ -629,9 +700,13 @@ $('s-ambient').addEventListener('change', e => { audio.unlock(); applySettings({
 $('s-ambVol').addEventListener('input', e => { store.setSettings({ ambVol: +e.target.value }); syncAmbient(); });
 $('swatches').onclick = e => { const b = e.target.closest('.sw'); if (b) applySettings({ accent: b.dataset.a }); };
 $('bgGrid').onclick = e => { const b = e.target.closest('.bgopt'); if (b) { applySettings({ bg: b.dataset.bg }); audio.unlock(); audio.play('tap'); } };
-$('s-voiceVol').addEventListener('change', e => { store.setSettings({ voiceVol: +e.target.value }); voice.speak('This is my voice.', { force: true }); });
-$('s-voiceName').addEventListener('change', e => { store.setSettings({ voiceName: e.target.value }); voice.speak('Hi, I’m Zyn.', { force: true }); });
-$('voiceTest').onclick = () => voice.speak('Welcome back. Let’s get focused.', { force: true });
+const voiceDemo = () => { audio.unlock(); voice.speak('Hi! I’m Zyn. Let’s focus together!', { force: true, priority: true, mood: 'excited', sound: 'yipyip' }); };
+$('s-voiceVol').addEventListener('change', e => { store.setSettings({ voiceVol: +e.target.value }); voiceDemo(); });
+$('s-voiceName').addEventListener('change', e => { store.setSettings({ voiceName: e.target.value }); voiceDemo(); });
+$('voiceStyle').onclick = e => { const b = e.target.closest('button'); if (b) { applySettings({ voiceStyle: b.dataset.v }); voiceDemo(); } };
+$('voicePitch').onclick = e => { const b = e.target.closest('button'); if (b) { applySettings({ voicePitch: b.dataset.p }); voiceDemo(); } };
+$('presets').onclick = e => { const b = e.target.closest('[data-preset]'); if (b) applyPreset(b.dataset.preset); };
+$('voiceTest').onclick = voiceDemo;
 $('goalList').onclick = e => { const b = e.target.closest('[data-goal]'); if (b) track.goalDialog(b.dataset.goal || undefined); };
 
 /* ---------- AI assistant settings ---------- */
@@ -754,7 +829,8 @@ if ('serviceWorker' in navigator) {
 }
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 // another tab/window changed the data: reload to stay consistent
-addEventListener('storage', e => { if (e.key && e.key.startsWith('sl.') && !e.key.endsWith('.corrupt') && !$('dlg').classList.contains('open')) location.reload(); });
+const LOCAL_ONLY = ['sl.greetAt', 'sl.v7', 'sl.voiceDay', 'sl.evo', 'sl.prerestore'];      // per-tab bookkeeping, not user data
+addEventListener('storage', e => { if (e.key && e.key.startsWith('sl.') && !e.key.endsWith('.corrupt') && !LOCAL_ONLY.includes(e.key) && !$('dlg').classList.contains('open')) location.reload(); });
 
 /* ---------- assistant: timer commands it may use (same guards as the buttons) ---------- */
 const startTimer = start, pauseTimer = pause;
@@ -780,8 +856,8 @@ function activityEvent(records) {
   const today = dkey(Date.now()), prog = goalProgress(store.activities, store.goals, today);
   const reached = prog.filter(g => g.met && records.some(r => r.name === g.name && r.unit === g.unit && r.day === today) &&
     g.done - records.filter(r => r.name === g.name && r.unit === g.unit && r.day === today).reduce((a, r) => a + r.qty, 0) < g.target);
-  if (reached.length) { wolf.react('howl', 3200, `${reached[0].label} goal reached!`); audio.play('levelUp'); voice.speak(`You reached your daily ${reached[0].label.toLowerCase()} goal.`, { priority: true }); }
-  else { wolf.react('happy', 2200); audio.play('task'); }
+  if (reached.length) { wolf.react('howl', 3200, [`${reached[0].label} goal reached! Awoo!`, 'excited', 'awoo'], { priority: true }); audio.play('levelUp'); }
+  else { wolf.react('happy', 2200, null); audio.play('task'); voice.speak('', { sound: 'yip', mood: 'happy' }); }
 }
 const chat = initChat({ store, assistant, $, wolfSVG, listener, toast, dialog,
   onReply: r => { if (r.kind === 'saved') { renderAll(); activityEvent(r.records); } } });
@@ -791,19 +867,35 @@ const track = initTrack({ store, $, esc, toast, dialog, onChange: r => { renderA
 function renderAll() { renderTimer(); renderChip(); if (view === 'tasksView') renderTasks(); if (view === 'statsView') { lastStats = ''; renderStats(); } if (view === 'settingsView') renderSettings(); if (view === 'trackView') track.render(); if (view === 'chatView') chat.micVisible(); }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { tick(); renderTimer(); lockScreen(); } });
 
+try {
+  if (!localStorage.getItem('sl.v7')) {
+    localStorage.setItem('sl.v7', '1');
+    const s0 = settings(), patch = {};
+    if (s0.bg === 'aurora') patch.bg = 'den';
+    if (s0.accent === 'blue') patch.accent = 'gold';
+    if (Object.keys(patch).length) store.setSettings(patch);
+  }
+} catch (e) {}
 applyTheme();
 if (settings().notify && (!('Notification' in window) || Notification.permission !== 'granted')) store.setSettings({ notify: false });
 if (timer.completed >= settings().rounds) timer = { ...timer, completed: 0 };
 renderAll();
 booted = true;
+// Zyn greets you by itself when the app opens (at most every 20 minutes). Browsers only allow sound after the first
+// tap, so on a cold start the bubble shows right away and the voice follows on your first touch.
 setTimeout(() => {
-  const v = discipline(store.history, Date.now()).vitality, h = new Date().getHours();
-  wolf.say(timer.running ? wolf.line(timer.mode === 'focus' ? 'focus' : 'rest')
-    : v === 'tired' || v === 'lonely' ? wolf.line(v)
-    : (h < 12 ? 'Good morning! ' : h < 18 ? 'Hey there! ' : 'Evening hunt? ') + wolf.line('idle'));
-}, 700);
-// spoken welcome: at most once per day, never while a session runs
-try { if (settings().voice && !timer.running && localStorage.getItem('sl.voiceDay') !== dkey(Date.now())) { localStorage.setItem('sl.voiceDay', dkey(Date.now())); const once = () => { voice.speak(wolfBase() === 'serious' ? 'Welcome back. Yesterday slipped — today we hunt.' : 'Welcome back. Let’s get focused.'); removeEventListener('pointerdown', once, true); }; addEventListener('pointerdown', once, true); } } catch (e) {}
+  const v = discipline(store.history, Date.now()).vitality, h = new Date().getHours(), base = wolfBase();
+  let l;
+  if (timer.running) l = wolf.line(timer.mode === 'focus' ? 'focus' : 'rest');
+  else if (base === 'proud') l = wolf.line('proud');
+  else if (base === 'serious') l = wolf.line('serious');
+  else if (v === 'tired' || v === 'lonely') l = wolf.line(v);
+  else { const [t, m, snd] = wolf.line('idle'); l = [(h < 5 ? 'Late hunt? ' : h < 12 ? 'Good morning! ' : h < 18 ? 'Hey there! ' : 'Good evening! ') + t, m, snd || 'yip']; }
+  let last = 0; try { last = +localStorage.getItem('sl.greetAt') || 0; } catch (e) {}
+  const speakIt = Date.now() - last > 20 * 60000;
+  if (speakIt) try { localStorage.setItem('sl.greetAt', String(Date.now())); } catch (e) {}
+  wolf.say(l, { voice: speakIt, priority: true });
+}, 900);
 lastBase = wolfBase();
 { const qv = new URLSearchParams(location.search).get('view'); if (['timerView', 'tasksView', 'chatView', 'trackView', 'statsView', 'settingsView'].includes(qv)) go(qv); }   // home-screen shortcuts
 setInterval(tick, 250);

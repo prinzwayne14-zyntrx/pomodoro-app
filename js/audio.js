@@ -124,7 +124,21 @@ export function createAudio(getSettings) {
     try { amb = buildAmbient(kind); ambKind = kind; amb.out.gain.setTargetAtTime(ambVolume(), ac.currentTime, .6); } catch (e) { amb = null; }
   }
 
+  // Zyn's voice has its own path (own volume, not muted by the effects switch) with a touch of the shared room reverb.
+  let vout = null;
+  function voiceOut() {
+    if (vout) return vout;
+    vout = ac.createGain();
+    const comp = ac.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 4;
+    const lift = ac.createGain(); lift.gain.value = 1.8;
+    vout.connect(comp); comp.connect(lift); lift.connect(ac.destination);
+    const room = ac.createConvolver(); room.buffer = verb.buffer; const send = ac.createGain(); send.gain.value = .14; vout.connect(room); room.connect(send); send.connect(lift);
+    return vout;
+  }
+
   return {
+    context() { return ctx() ? ac : null; },    // shared AudioContext (for Zyn's voice)
+    voiceOut,
     play(name) { if (ready()) { try { fx[name](); } catch (e) {} } },
     unlock() { ready(); },                     // call from a user gesture to satisfy browser autoplay rules
     ambient,                                   // 'off' | 'rain' | 'brown' | 'waves' | 'white'

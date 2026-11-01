@@ -13,12 +13,12 @@ Plain HTML/CSS/JS (ES modules): **no build step, no accounts, no servers.** Ever
 
 | Area | What you get |
 |---|---|
-| **Focus timer** | Focus / short / long break, custom durations, auto-start, 3-second countdown, repeating end alarm, focus sounds (rain, brown noise, waves, white noise), banner notifications, screen kept awake. |
+| **Focus timer** | Focus / short / long break, one-tap rhythms (Classic 25/5, Deep work 50/10, Flow 90/15, Sprint 15/3 — tap the time), **+5 min** while running, “Ends at” time, full-screen focus mode, desktop shortcuts (Space, R, S, F, 1/2/3, +), task session estimates (e.g. 2/4), custom durations, auto-start, 3-second countdown, repeating end alarm, focus sounds (rain, brown noise, waves, white noise), banner notifications, screen kept awake. |
 | **Zyn (chat)** | Natural language logging: “I did 20 squats and a 45-second plank”, “read 15 pages yesterday”, “actually it was 25”. Questions answered from your data: “How many push-ups this week?”, “What did I accomplish today?”, “What should I improve tomorrow?”. Timer commands and goals. Voice input with review before sending. |
 | **Track** | Today’s goals, quick-log buttons, a manual form (any day in the past), and the full entry list with edit / delete / undo. |
 | **Statistics** | *Focus* tab: today, goal ring, evolution, rank, 14-day consistency score, 7-day chart, best time of day, 12-week heatmap, totals and history. *Activity* tab: entries per day / week / month, exercise days, habit completion rates (7 and 30 days), totals per activity, exercise history. Tap any **i** for the exact definition. |
-| **Zyn the wolf** | Moods follow real events: calm (idle), alert (focus), motivated (second half of a session), relaxed / asleep (break), proud (today’s goal met), serious (yesterday’s goal missed), celebrating (level-up, rank-up, evolution). Evolves Pup → Scout → Hunter → Alpha → Spirit Wolf from discipline points (active days, strong days, best streak) — never lost. Speaks at key moments (optional, adjustable volume, device voices). |
-| **Appearance** | 10 backgrounds (Aurora, AMOLED, Charcoal, Midnight, Purple, Dusk, Wolf moon, Mountains, Forest, Light), 4 accent colours, calm mode. Backgrounds are lightweight vector art; picture backgrounds get a dimming layer and more opaque cards for readability. |
+| **Zyn the wolf** | Moods follow real events: calm (idle), alert (focus), motivated (second half of a session), relaxed / asleep (break), proud (today’s goal met), serious (yesterday’s goal missed), celebrating (level-up, rank-up, evolution). Evolves Pup → Scout → Hunter → Alpha → Spirit Wolf from discipline points (active days, strong days, best streak) — never lost. Talks on its own at key moments (app open, start, halfway, 1 min left, done, breaks, goals, level-ups) in a **cute character voice**: a made-up wolf language plus pup sounds (yip, giggle, howl, yawn), synthesized on-device, with the mouth moving in time. Optional “Words” style uses the device voice instead. Browsers allow sound only after the first tap, so the very first greeting plays on that tap. |
+| **Appearance** | “Night den” design (Fredoka + Nunito, bundled in `fonts/`, SIL OFL). 11 backgrounds (Night den, Aurora, AMOLED, Charcoal, Midnight, Purple, Dusk, Wolf moon, Mountains, Forest, Light), 4 accent colours, calm mode. Backgrounds are lightweight vector art; picture backgrounds get a dimming layer and more opaque cards for readability. |
 | **Data** | Local storage with validation, migrations, duplicate protection, audit trail of activity changes, JSON backup / restore (old Solo Leveling and Zyntry backups import too). |
 
 ## How the AI assistant records data safely
@@ -65,7 +65,8 @@ js/ai/validate.js              sanitize + validate (the gate before storage)
 js/ai/engines.js               engine interface: rules, WebLLM (WebGPU), local server
 js/ai/assistant.js             conversation, clarifications, confirmations, read-only answers
 js/ui/chat.js, js/ui/track.js  chat and tracking screens
-js/voice.js, js/wolf.js, js/audio.js   voice, companion, generated sounds
+js/voice.js, js/zynvoice.js     voice input; Zyn's character voice (Web Audio babble + pup sounds) or device speech
+js/wolf.js, js/audio.js        companion, generated sounds
 ```
 
 ## Tests

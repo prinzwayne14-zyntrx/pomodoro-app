@@ -43,3 +43,13 @@ export function nextAfterComplete(t, settings) {
   const c = t.completed + 1;
   return c >= settings.rounds ? { mode: 'long', completed: 0 } : { mode: 'short', completed: c };
 }
+// Add (or remove) time to the current session. The session length grows too, so a completed session records
+// exactly how long you focused. Never below 1 minute left, never above 180 minutes in total.
+export function addTime(t, ms, now) {
+  const total = Math.min(180 * 60000, Math.max(60000, t.total + ms)), d = total - t.total;
+  if (!d) return t;
+  if (t.running) return { ...t, total, endAt: Math.max(now + 60000, t.endAt + d) };
+  return { ...t, total, remaining: Math.max(Math.min(60000, total), Math.min(total, t.remaining + d)) };
+}
+// Wall-clock time the running session ends at (0 when not running).
+export const endsAt = t => t.running ? t.endAt : 0;
