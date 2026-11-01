@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ZENTRY</title>
-<meta name="theme-color" content="#07080f">
+<meta name="theme-color" content="#15123a">
 <meta name="description" content="ZENTRY — focus timer, habit and activity tracker with a wolf companion and a private AI assistant. Works offline.">
 <meta name="application-name" content="ZENTRY">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,10 +17,11 @@
 <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="preload" href="fonts/fredoka.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-mode="focus" data-accent="blue" data-bg="aurora" data-theme="dark">
-<div id="backdrop" class="bgfill" data-bg="aurora" aria-hidden="true"></div>
+<body data-mode="focus" data-accent="gold" data-bg="den" data-theme="dark">
+<div id="backdrop" class="bgfill" data-bg="den" aria-hidden="true"></div>
 
 <div id="splash" aria-hidden="true">
   <svg viewBox="0 0 100 100" class="splash-mark"><use href="#zmark"/></svg>
@@ -55,13 +56,13 @@
   <main class="views">
     <!-- FOCUS -->
     <section class="view active" id="timerView" aria-label="Focus timer">
-      <div class="card player" id="player">
+      <button class="card player" id="player" type="button" aria-label="Level and rank — open statistics">
         <div class="rank"><span id="rankLetter">E</span></div>
         <div class="pinfo">
-          <div class="prow"><div class="lv">Lv <span id="lvNum">1</span><small id="rankName">Rank E</small></div><div class="xpn" id="xpNum">0 / 100 XP</div></div>
+          <div class="prow"><div class="lv">Level <span id="lvNum">1</span><small id="rankName">Rank E</small></div><div class="xpn" id="xpNum">0 / 100 XP</div></div>
           <div class="bar"><i id="xpBar"></i></div>
         </div>
-      </div>
+      </button>
 
       <div class="seg tabs" id="tabs" role="tablist">
         <button class="tab active" data-mode="focus" role="tab">Focus</button>
@@ -69,50 +70,55 @@
         <button class="tab" data-mode="long" role="tab">Long break</button>
       </div>
 
-      <div class="chips">
-        <button class="chipbtn" id="taskChip" aria-label="Choose task"><i>Task</i><span id="taskName">None</span></button>
-        <button class="chipbtn snd" id="soundChip" aria-label="Focus sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10"/></svg><span id="soundName">Off</span></button>
+      <div class="stage-area">
+        <div class="ring-wrap">
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <defs>
+              <radialGradient id="moonface" cx=".5" cy=".38" r=".62"><stop offset="0" style="stop-color:var(--moon-1)"/><stop offset="1" style="stop-color:var(--moon-2)"/></radialGradient>
+            </defs>
+            <circle class="moon" cx="60" cy="60" r="46"/>
+            <g id="ticks"></g>
+            <g class="rot">
+              <circle class="track" cx="60" cy="60" r="53"/>
+              <circle class="progress" id="progress" cx="60" cy="60" r="53"/>
+              <circle class="endcap" id="endcap" r="3.4" cx="113" cy="60"/>
+            </g>
+          </svg>
+          <div class="time">
+            <button class="wolf" id="wolf" data-state="idle" data-stage="1" aria-label="Zyn the wolf — tap to talk"></button>
+            <button class="clockbtn" id="clockBtn" type="button" aria-label="Change session length"><span id="clock" role="timer" aria-live="off">25:00</span></button>
+            <div id="label">Focus</div>
+          </div>
+          <div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+          <button class="icon-btn zen-btn" id="zenBtn" type="button" aria-label="Full-screen focus mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        </div>
+        <div class="runline" id="runline"><span id="endsAt"></span><button class="mini-btn" id="extend" type="button" aria-label="Add 5 minutes">+5 min</button></div>
       </div>
 
-      <div class="ring-wrap">
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <defs>
-            <linearGradient id="grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="120" y2="120">
-              <stop offset="0" style="stop-color:var(--g2)"/><stop offset="1" style="stop-color:var(--g1)"/>
-            </linearGradient>
-          </defs>
-          <g id="ticks"></g>
-          <g class="rot">
-            <circle class="track" cx="60" cy="60" r="48"/>
-            <circle class="progress" id="progress" cx="60" cy="60" r="48"/>
-            <circle class="endcap" id="endcap" r="2.6" cx="108" cy="60"/>
-          </g>
-        </svg>
-        <div class="time">
-          <button class="wolf" id="wolf" data-state="idle" data-stage="1" aria-label="Zyn the wolf — tap to talk"></button>
-          <div id="clock" role="timer" aria-live="off">25:00</div>
-          <div id="label">Focus</div>
-        </div>
-        <div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+      <div class="chips">
+        <button class="chipbtn" id="taskChip" aria-label="Choose task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6" fill="currentColor"/></svg><span id="taskName">Pick a task</span><em id="taskProg"></em></button>
+        <button class="chipbtn snd" id="soundChip" aria-label="Focus sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10"/></svg><span id="soundName">Off</span></button>
       </div>
 
       <div class="controls">
         <button class="btn-side" id="reset" aria-label="Reset session">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4h4"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4h4"/></svg>
         </button>
         <button class="btn-main" id="toggle"><span id="toggleIcon"></span><span id="toggleText">Start</span></button>
         <button class="btn-side" id="skip" aria-label="Skip to next">
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 6l9 6-9 6z"/><path d="M19 6v12" fill="none"/></svg>
         </button>
       </div>
-      <div class="goalrow"><div class="dots" id="dots"></div><span class="goal" id="goalTxt"></span></div>
+      <div class="goalrow"><div class="dots" id="dots" aria-label="Sessions until the long break"></div><span class="goal" id="goalTxt"></span></div>
     </section>
 
     <!-- TASKS -->
     <section class="view scroll" id="tasksView" aria-label="Tasks">
       <h1 class="vtitle">Tasks</h1>
+      <p class="vsub" id="tasksSub">Plan today, then pick a task on the timer.</p>
       <form class="card add" id="taskForm" autocomplete="off">
         <input type="text" id="taskInput" placeholder="Add a task…" maxlength="120" enterkeyhint="done" aria-label="New task">
+        <select id="taskEstSel" aria-label="Estimated focus sessions" class="est"><option value="0">Sessions?</option><option value="1">1 session</option><option value="2">2 sessions</option><option value="3">3 sessions</option><option value="4">4 sessions</option><option value="6">6 sessions</option><option value="8">8 sessions</option></select>
         <select id="taskPri" aria-label="Priority"><option value="1">High</option><option value="2" selected>Medium</option><option value="3">Low</option></select>
         <button class="btn-sm" type="submit">Add</button>
       </form>
@@ -125,7 +131,7 @@
     <!-- ZYN CHAT -->
     <section class="view" id="chatView" aria-label="Chat with Zyn">
       <div class="chat-head">
-        <div class="wolf avatar" id="chatWolf" data-state="idle" data-stage="1"></div>
+        <div class="wolf avatar mirror" id="chatWolf" data-state="idle" data-stage="1"></div>
         <div class="chat-who"><b>Zyn</b><small id="aiStatus">Built-in parser · offline</small></div>
         <button class="icon-btn" id="chatClear" aria-label="Clear conversation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>
       </div>
@@ -151,19 +157,27 @@
       <div class="section-t">Appearance</div>
       <div class="card list">
         <div class="field stack"><span>Background<small>Saved on this device.</small></span><div class="bggrid" id="bgGrid"></div></div>
-        <div class="field"><span>Accent colour</span><div class="swatches" id="swatches">
-          <button class="sw" data-a="blue" aria-label="Blue"></button><button class="sw" data-a="violet" aria-label="Violet"></button>
-          <button class="sw" data-a="crimson" aria-label="Crimson"></button><button class="sw" data-a="gold" aria-label="Gold"></button></div></div>
+        <div class="field"><span>Focus colour</span><div class="swatches" id="swatches">
+          <button class="sw" data-a="gold" aria-label="Moon gold"></button><button class="sw" data-a="blue" aria-label="Sky blue"></button><button class="sw" data-a="violet" aria-label="Violet"></button>
+          <button class="sw" data-a="crimson" aria-label="Ember red"></button></div></div>
         <label class="field"><span>Show Zyn on the timer<small>Your wolf companion.</small></span><input type="checkbox" id="s-wolf"></label>
         <label class="field"><span>Calm mode<small>Turns off background motion and animations.</small></span><input type="checkbox" id="s-calm"></label>
       </div>
 
       <div class="section-t">Zyn's voice</div>
       <div class="card list">
-        <label class="field"><span>Voice<small id="voiceNote">Zyn speaks at key moments: session start and end, breaks, goals.</small></span><input type="checkbox" id="s-voice"></label>
+        <label class="field"><span>Zyn talks<small id="voiceNote">Zyn speaks on its own at key moments: when you open the app, start, reach halfway, finish, take a break, hit a goal.</small></span><input type="checkbox" id="s-voice"></label>
+        <div class="field stack"><span>Voice style</span>
+          <div class="seg two" id="voiceStyle">
+            <button type="button" data-v="zyn"><b>Zyn</b><small>Cute wolf language</small></button>
+            <button type="button" data-v="device"><b>Words</b><small>Device reads it aloud</small></button>
+          </div>
+        </div>
+        <div class="field" id="pitchRow"><span>Zyn's voice<small>Pup is higher and bouncier.</small></span><div class="seg two slim" id="voicePitch"><button type="button" data-p="pup">Pup</button><button type="button" data-p="low">Grown</button></div></div>
+        <label class="field" id="deviceVoiceRow"><span>Device voice<small>Voices come from your phone or computer.</small></span><select id="s-voiceName"><option value="">Automatic</option></select></label>
+        <label class="field"><span>Chatty Zyn<small>Also talks when the timer changes, like halfway and pause.</small></span><input type="checkbox" id="s-chatty"></label>
         <label class="field"><span>Voice volume</span><input type="range" id="s-voiceVol" min="0" max="100"></label>
-        <label class="field"><span>Voice<small>Voices come from your device.</small></span><select id="s-voiceName"><option value="">Automatic</option></select></label>
-        <div class="field"><span>Try it</span><button class="btn-sm ghost" id="voiceTest" type="button">Play</button></div>
+        <div class="field"><span>Hear Zyn</span><button class="btn-sm ghost" id="voiceTest" type="button">Play</button></div>
       </div>
 
       <div class="section-t">Timer</div>
@@ -172,6 +186,7 @@
         <label class="field"><span>Short break (min)</span><input type="number" id="s-short" min="1" max="60" inputmode="numeric"></label>
         <label class="field"><span>Long break (min)</span><input type="number" id="s-long" min="1" max="90" inputmode="numeric"></label>
         <label class="field"><span>Sessions before long break</span><input type="number" id="s-rounds" min="2" max="10" inputmode="numeric"></label>
+        <div class="field stack"><span>Quick presets<small>Tap to set focus and break lengths together.</small></span><div class="presets" id="presets"></div></div>
         <label class="field"><span>Daily focus goal (sessions)</span><input type="number" id="s-goal" min="1" max="20" inputmode="numeric"></label>
         <label class="field"><span>Auto-start next session<small>Only when the previous one just ended.</small></span><input type="checkbox" id="s-auto"></label>
       </div>
@@ -249,16 +264,17 @@
   <nav id="nav" aria-label="Main">
     <button class="active" data-view="timerView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 1.5M9.5 2.5h5"/></svg>Focus</button>
     <button data-view="tasksView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>Tasks</button>
-    <button data-view="chatView" class="zyn-tab"><span class="zyn-ic"><svg viewBox="0 0 100 100" aria-hidden="true"><use href="#zmark"/></svg></span>Zyn</button>
+    <button data-view="chatView" class="zyn-tab"><span class="zyn-ic"><svg viewBox="0 0 100 100" aria-hidden="true"><use href="#zmark"/></svg></span><span>Zyn</span></button>
     <button data-view="trackView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/></svg>Track</button>
     <button data-view="statsView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 20v-8M12 20V4M19 20v-5"/></svg>Stats</button>
   </nav>
 </div>
 
+<button id="zenExit" type="button" aria-label="Exit full-screen focus mode">Exit focus mode</button>
 <div id="dlg" role="dialog" aria-modal="true"><div class="dlgbox" id="dlgBox"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="tip" role="tooltip"></div>
-<div id="lvl"><div class="wolf big" id="lvlWolf" data-state="howl" data-stage="1"></div><div class="t" id="lvlT">LEVEL UP</div><div class="n" id="lvlN">2</div><div class="s" id="lvlS"></div></div>
+<div id="lvl"><div class="wolf big mirror" id="lvlWolf" data-state="howl" data-stage="1"></div><div class="t" id="lvlT">LEVEL UP</div><div class="n" id="lvlN">2</div><div class="s" id="lvlS"></div></div>
 
 <script type="module" src="js/app.js"></script>
 </body>

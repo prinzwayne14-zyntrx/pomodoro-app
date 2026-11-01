@@ -112,7 +112,7 @@ await test('changing durations never disturbs a running session', async () => {
 await test('wolf reacts to the timer; goal + streak shown; sound chip cycles; quick-add task', async () => {
   const p = await fresh(ctx, { 'sl.history': [{ id: 'g1', t: now() - 5000, m: 'focus', s: 1500, c: 1, x: 35 }, { id: 'g0', t: now() - 864e5, m: 'focus', s: 1500, c: 1, x: 35 }] });
   eq(await p.getAttribute('#wolf', 'data-state'), 'idle'); ok(await p.locator('#wolf svg').count() === 1, 'wolf svg');
-  eq((await p.textContent('#goalTxt')).trim(), '1 / 6 today'); eq(await p.textContent('#streakN'), '2');
+  ok((await p.textContent('#goalTxt')).trim().startsWith('1 of 6 today'), 'goal text'); eq(await p.textContent('#streakN'), '2');
   await p.click('#toggle'); eq(await p.getAttribute('#wolf', 'data-state'), 'focus');
   await p.click('#toggle'); eq(await p.getAttribute('#wolf', 'data-state'), 'paused');
   await p.click('#soundChip'); eq(await p.textContent('#soundName'), 'Rain'); eq((await get(p, 'sl.settings')).ambient, 'rain');
@@ -125,7 +125,7 @@ await test('wolf reacts to the timer; goal + streak shown; sound chip cycles; qu
 await test('daily goal reached: wolf howls', async () => {
   const p = await fresh(ctx, { 'sl.settings': { goal: 1 }, 'sl.timer': T({ running: true, endAt: now() + 1200, sid: 'goal-1' }) });
   await p.waitForFunction(() => document.getElementById('wolf').dataset.state === 'howl', null, { timeout: 6000 });
-  ok((await p.textContent('#goalTxt')).includes('1 / 1'), 'goal text'); await p.close();
+  ok((await p.textContent('#goalTxt')).includes('1 of 1'), 'goal text'); await p.close();
 });
 
 await test('Zyn evolves from discipline and the evolution is celebrated once', async () => {
@@ -237,7 +237,7 @@ await test('backgrounds: every option applies, persists after restart, and keeps
       return { bg: document.body.dataset.bg, theme: document.body.dataset.theme, text, solid: bgc };
     });
     eq(r.bg, bg);
-    if (bg === 'light') { eq(r.theme, 'light'); ok(r.text === 'rgb(17, 22, 39)', 'dark text on light: ' + r.text); } else ok(r.text === 'rgb(238, 240, 251)', 'light text on dark: ' + r.text);
+    if (bg === 'light') { eq(r.theme, 'light'); ok(r.text === 'rgb(30, 24, 80)', 'dark text on light: ' + r.text); } else ok(r.text === 'rgb(255, 244, 220)', 'light text on dark: ' + r.text);
   }
   await p.click('.bgopt[data-bg=wolf]'); await p.reload(); await p.waitForSelector('#clock');
   eq(await p.evaluate(() => [document.body.dataset.bg, document.getElementById('backdrop').dataset.bg]), ['wolf', 'wolf']);
@@ -259,10 +259,16 @@ await test('voice: Zyn speaks at session start (only when enabled) and the volum
     await p.goto(URL_); await p.evaluate(s => { localStorage.clear(); localStorage.setItem('sl.settings', JSON.stringify(s)); }, settings); await p.reload(); await p.waitForSelector('#clock');
     return p;
   };
-  let p = await mk({ voice: true, voiceVol: 40 }); await p.click('#toggle');
-  const said = await p.evaluate(() => window.__said); ok(said.some(([t, v]) => /focus session is starting/.test(t) && v === .4), JSON.stringify(said));
+  // "Words" style: the device voice reads Zyn's line, at the chosen volume
+  let p = await mk({ voice: true, voiceVol: 40, voiceStyle: 'device' }); await p.click('#toggle');
+  const said = await p.evaluate(() => window.__said); ok(said.some(([t, v]) => t.length > 3 && v === .4), JSON.stringify(said));
   await p.close();
-  p = await mk({ voice: false }); await p.click('#toggle'); eq(await p.evaluate(() => window.__said.length), 0, 'silent when off'); await p.close();
+  // default "Zyn" style: the character voice talks (mouth moves), the device voice stays silent
+  p = await mk({ voice: true }); await p.click('#toggle');
+  await p.waitForFunction(() => document.getElementById('wolf').dataset.talk === '1', null, { timeout: 3000 });
+  eq(await p.evaluate(() => window.__said.length), 0, 'no robot voice in Zyn style'); await p.close();
+  p = await mk({ voice: false }); await p.click('#toggle'); await p.waitForTimeout(400);
+  eq(await p.evaluate(() => window.__said.length), 0, 'silent when off'); ok(await p.evaluate(() => document.getElementById('wolf').dataset.talk !== '1'), 'no talking when off'); await p.close();
 });
 await test('timer: a long background period (throttled timers, jumped clock) finishes the session exactly once', async () => {
   const c = await newCtx(); const p = await c.newPage();
@@ -317,7 +323,7 @@ await test('statistics are computed from recorded sessions', async () => {
   ok(txt.includes('Sessions done3'), 'sessions'); ok(txt.includes('Completion75%'), 'completion'); ok(txt.includes('Day streak3days'), 'streak'); ok(txt.includes('Total XP105'), 'xp');
   eq(await p.locator('.hrow').count(), 4); const hc = await p.locator('.heat i').count(); ok(hc >= 78 && hc <= 84, 'heat cells ' + hc); eq(await p.locator('.col').count(), 7);
   eq(await p.locator('.d14 i').count(), 14); eq(await p.locator('.dp').count(), 4); ok(txt.includes('Discipline · 14 days'), 'discipline card');
-  ok(txt.includes('Zyn · Evolution') && txt.includes('Scout'), 'evolution card');                    // 3 active days + 3 streak days*2 = 9 -> still Pup, next Scout
+  ok(txt.includes('Zyn\'s evolution') && txt.includes('Scout'), 'evolution card');                    // 3 active days + 3 streak days*2 = 9 -> still Pup, next Scout
   ok(txt.includes('Novice') && txt.includes('XP to Rank D'), 'rank card');
   await p.locator('.col').nth(6).click(); await p.waitForSelector('#tip.show'); ok((await p.textContent('#tip')).includes('35m'), 'tap tooltip'); await p.close();
 });
@@ -365,6 +371,22 @@ await test('v1 data from the previous version is migrated, not lost', async () =
   await p.evaluate(n => { localStorage.clear(); localStorage.setItem('sololeveling.history.v1', JSON.stringify([{ t: n - 1e6, m: 'focus', s: 1500, c: 1 }])); localStorage.setItem('sololeveling.state.v1', JSON.stringify({ settings: { focus: 40 }, mode: 'focus', running: false, remaining: 2400000, completed: 1 })); }, now());
   await p.reload(); await p.waitForSelector('#clock'); eq(await p.textContent('#clock'), '40:00'); eq((await get(p, 'sl.history')).length, 1);
   await p.reload(); eq((await get(p, 'sl.history')).length, 1); ok(await p.evaluate(() => !!localStorage.getItem('sololeveling.history.v1')), 'old key must remain'); await p.close();
+});
+
+/* ---------- v7: presets, extra time, task estimates, focus mode, shortcuts ---------- */
+await test('session presets, +5 min, ends-at line, task estimates, focus mode and keyboard shortcuts', async () => {
+  const p = await fresh(ctx);
+  await p.click('#clockBtn'); await p.waitForSelector('#dlg.open'); await p.click('#dlgBox [data-preset=deep]');
+  eq(await p.textContent('#clock'), '50:00'); const st = await get(p, 'sl.settings'); eq([st.focus, st.short, st.long], [50, 10, 20]);
+  await p.click('#toggle'); ok(/^Ends at /.test(await p.textContent('#endsAt')), 'ends-at line');
+  await p.click('#extend'); const t = await get(p, 'sl.timer'); eq(t.total, 55 * 60000); ok(['54:59', '55:00', '54:58'].includes(await p.textContent('#clock')), 'clock +5');
+  await p.evaluate(() => document.activeElement.blur()); await p.keyboard.press('Space'); eq((await get(p, 'sl.timer')).running, false, 'space pauses');
+  await p.click('#zenBtn'); eq(await p.evaluate(() => document.body.dataset.zen), '1'); ok(!(await p.isVisible('nav')), 'nav hidden in focus mode');
+  await p.click('#zenExit'); eq(await p.evaluate(() => document.body.dataset.zen), '0');
+  await goto(p, 'tasksView'); await p.fill('#taskInput', 'Essay'); await p.selectOption('#taskEstSel', '3'); await p.click('#taskForm .btn-sm');
+  const tk = (await get(p, 'sl.tasks'))[0]; eq(tk.est, 3); ok((await p.textContent('.task .meta')).includes('0 of 3 sessions'), 'estimate shown');
+  await p.click('.task .pick'); await goto(p, 'timerView'); eq(await p.textContent('#taskProg'), '0/3');
+  eq(p.errs, []); await p.close();
 });
 
 /* ---------- layout ---------- */
@@ -418,11 +440,11 @@ await test('service-worker update: new version is picked up automatically, user 
   await p.goto('http://127.0.0.1:8124/index.html'); await p.evaluate(() => localStorage.clear()); await p.reload();
   await p.waitForFunction(() => navigator.serviceWorker.controller, null, { timeout: 15000 });
   await p.evaluate(() => { localStorage.setItem('sl.history', JSON.stringify([{ id: 'u1', t: Date.now() - 1e5, m: 'focus', s: 1500, c: 1, x: 35 }])); window.__marker = 1; });
-  fs.writeFileSync(path.join(tmp, 'sw.js'), fs.readFileSync(path.join(tmp, 'sw.js'), 'utf8').replace("VERSION = '6.0.0'", "VERSION = '6.0.1-test'"));
+  fs.writeFileSync(path.join(tmp, 'sw.js'), fs.readFileSync(path.join(tmp, 'sw.js'), 'utf8').replace("VERSION = '7.0.0'", "VERSION = '7.0.1-test'"));
   await p.evaluate(() => navigator.serviceWorker.getRegistration().then(r => r.update()));
   await p.waitForFunction(() => !window.__marker, null, { timeout: 15000 });             // page reloaded itself
   await p.waitForSelector('#clock');
-  const keys = await p.evaluate(() => caches.keys()); eq(keys.sort(), ['zentry-6.0.1-test']); // old cache removed
+  const keys = await p.evaluate(() => caches.keys()); eq(keys.sort(), ['zentry-7.0.1-test']); // old cache removed
   eq((await get(p, 'sl.history')).length, 1, 'data must survive an update'); eq(await p.textContent('#xpNum'), '35 / 100 XP');
   } finally { await c.close(); s2.kill(); }
 });

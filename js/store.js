@@ -7,13 +7,13 @@ export const DATA_VERSION = 3;
 export const MODES = ['focus', 'short', 'long'];
 export const ACCENTS = ['blue', 'violet', 'crimson', 'gold'];
 export const AMBIENTS = ['off', 'rain', 'brown', 'waves', 'white'];
-export const BACKGROUNDS = ['aurora', 'amoled', 'charcoal', 'midnight', 'purple', 'gradient', 'wolf', 'mountains', 'forest', 'light'];
+export const BACKGROUNDS = ['den', 'aurora', 'amoled', 'charcoal', 'midnight', 'purple', 'gradient', 'wolf', 'mountains', 'forest', 'light'];
 export const AI_ENGINES = ['rules', 'webllm', 'server'];
-export const DEFAULT_SETTINGS = { focus: 25, short: 5, long: 15, rounds: 4, goal: 6, auto: false, sound: true, volume: 70, ticks: true, alarm: true, notify: false, accent: 'blue', black: false, calm: false, wolf: true, ambient: 'off', ambVol: 50,
-  bg: 'aurora', voice: true, voiceVol: 80, voiceName: '', stt: true, chatSave: true,
+export const DEFAULT_SETTINGS = { focus: 25, short: 5, long: 15, rounds: 4, goal: 6, auto: false, sound: true, volume: 70, ticks: true, alarm: true, notify: false, accent: 'gold', black: false, calm: false, wolf: true, ambient: 'off', ambVol: 50,
+  bg: 'den', voice: true, voiceVol: 80, voiceName: '', voiceStyle: 'zyn', voicePitch: 'pup', chatty: true, stt: true, chatSave: true,
   ai: 'rules', aiModel: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC', aiUrl: 'http://localhost:11434', aiApi: 'ollama', aiServerModel: 'qwen2.5:1.5b' };
 const LIM = { focus: [1, 180], short: [1, 60], long: [1, 90], rounds: [2, 10], goal: [1, 20] };
-const BOOL = ['auto', 'sound', 'ticks', 'alarm', 'notify', 'black', 'calm', 'wolf', 'voice', 'stt', 'chatSave'];
+const BOOL = ['auto', 'sound', 'ticks', 'alarm', 'notify', 'black', 'calm', 'wolf', 'voice', 'chatty', 'stt', 'chatSave'];
 export const BACKUP_APPS = ['zentry', 'zyntry', 'solo-leveling'];   // backups from the app's previous names still import
 // storage keys keep the original 'sl.' prefix so existing installs keep their data
 const KEYS = { settings: 'sl.settings', timer: 'sl.timer', history: 'sl.history', tasks: 'sl.tasks', meta: 'sl.meta', activities: 'sl.activities', goals: 'sl.goals', chat: 'sl.chat', audit: 'sl.audit' };
@@ -34,6 +34,8 @@ export function cleanSettings(s) {
   if (AMBIENTS.includes(s.ambient)) o.ambient = s.ambient;
   o.voiceVol = clampInt(s.voiceVol, [0, 100], DEFAULT_SETTINGS.voiceVol);
   if (BACKGROUNDS.includes(s.bg)) o.bg = s.bg; else if (s.black === true) o.bg = 'amoled';     // migrate the old "pure black" switch
+  if (s.voiceStyle === 'zyn' || s.voiceStyle === 'device') o.voiceStyle = s.voiceStyle;
+  if (s.voicePitch === 'pup' || s.voicePitch === 'low') o.voicePitch = s.voicePitch;
   if (AI_ENGINES.includes(s.ai)) o.ai = s.ai;
   if (s.aiApi === 'openai' || s.aiApi === 'ollama') o.aiApi = s.aiApi;
   for (const [k, n] of [['voiceName', 120], ['aiModel', 100], ['aiServerModel', 100]]) if (typeof s[k] === 'string' && s[k].length <= n) o[k] = s[k];
@@ -95,7 +97,8 @@ export function cleanTask(t) {
     id: typeof t.id === 'string' && t.id && t.id.length < 60 ? t.id : uid(),
     title, pri: [1, 2, 3].includes(Number(t.pri)) ? Number(t.pri) : 2, done, doneAt, created,
     day: typeof t.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.day) ? t.day : dkey(created),
-    n: clampInt(t.n, [0, 100000], 0)
+    n: clampInt(t.n, [0, 100000], 0),
+    est: clampInt(t.est, [0, 20], 0)            // estimated focus sessions (0 = no estimate)
   };
 }
 export function cleanTimer(r, s) {
@@ -193,8 +196,8 @@ export function createStore(storage) {
   };
 
   /* tasks */
-  S.addTask = (title, pri = 2) => {
-    const t = cleanTask({ id: uid(), title, pri, created: Date.now() });
+  S.addTask = (title, pri = 2, est = 0) => {
+    const t = cleanTask({ id: uid(), title, pri, est, created: Date.now() });
     if (!t) return null;
     S.tasks.push(t); saveTasks(); return t;
   };

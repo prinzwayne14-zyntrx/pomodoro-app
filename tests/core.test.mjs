@@ -89,7 +89,7 @@ test('validation clamps and rejects bad values', () => {
   assert.equal(cleanSettings({ short: -4 }).short, 1);
   assert.equal(cleanSettings({ rounds: 'x' }).rounds, 4);
   assert.equal(cleanSettings({ volume: 500 }).volume, 100);
-  assert.equal(cleanSettings({ accent: 'neon' }).accent, 'blue');
+  assert.equal(cleanSettings({ accent: 'neon' }).accent, 'gold');
   assert.equal(cleanSession({ t: -1, m: 'focus', s: 5 }), null);
   assert.equal(cleanSession({ t: 5, m: 'bogus', s: 5 }), null);
   assert.equal(cleanSession({ t: 5, m: 'focus', s: 999999 }), null);
@@ -205,4 +205,23 @@ test('discipline points drive evolution; vitality follows recent routine', async
   assert.equal(d.stage.name, 'Scout'); assert.equal(d.next.name, 'Hunter'); assert.equal(d.toGo, 15); assert.equal(d.vitality, 'strong');
   assert.equal(discipline(h, NOW + 3 * DAY).vitality, 'tired'); assert.equal(discipline(h, NOW + 9 * DAY).vitality, 'lonely');
   assert.equal(discipline(h, NOW + 9 * DAY).stage.name, 'Scout');            // evolution is never lost
+});
+
+test('timer: +5 min grows the session (running and paused), within limits', async () => {
+  const TM = await import('../js/timer.js');
+  const t0 = { mode: 'focus', running: true, endAt: NOW + 60000, remaining: 0, total: 1500000, sid: 'x', completed: 0, task: null };
+  const t1 = TM.addTime(t0, 300000, NOW); assert.equal(t1.total, 1800000); assert.equal(t1.endAt, NOW + 360000);
+  const p0 = { ...t0, running: false, endAt: 0, remaining: 120000 }, p1 = TM.addTime(p0, 300000, NOW);
+  assert.equal(p1.remaining, 420000); assert.equal(p1.total, 1800000);
+  assert.equal(TM.addTime({ ...t0, total: 180 * 60000 }, 300000, NOW).total, 180 * 60000);
+});
+test('Zyn voice: text becomes syllables with vowels and sentence endings', async () => {
+  const { syllables } = await import('../js/zynvoice.js');
+  const s = syllables('Great hunt! Ready?');
+  assert.ok(s.length >= 4); assert.ok(s.every(x => 'aeiouy'.includes(x.v)));
+  assert.equal(s.find(x => x.end === '!') && true, true); assert.equal(s[s.length - 1].end, '?');
+  assert.deepEqual(syllables(''), []); assert.deepEqual(syllables('🐺🐺'), []);
+});
+test('tasks keep a valid session estimate', () => {
+  assert.equal(cleanTask({ title: 'a', est: 3 }).est, 3); assert.equal(cleanTask({ title: 'a', est: 99 }).est, 20); assert.equal(cleanTask({ title: 'a' }).est, 0);
 });
